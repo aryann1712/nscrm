@@ -1,33 +1,35 @@
-name: 🚀 Auto Deploy to Hostinger/CyberPanel via FTP
+name: Deploy to Hostinger via FTP
 
 on:
   push:
     branches:
-      - main    # Deploy when pushing to main
+      - main
+      
 
 jobs:
   ftp-deploy:
+    name: FTP Deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Upload via FTP
+      - name: Upload to Hostinger
         uses: SamKirkland/FTP-Deploy-Action@v4.3.6
         with:
-          server: ${{ secrets.FTP_HOST }}         # e.g. 72.60.101.251
-          username: ${{ secrets.FTP_USERNAME }}   # your FTP username
-          password: ${{ secrets.FTP_PASSWORD }}   # your FTP password
-          port: ${{ secrets.FTP_PORT }}           # usually 21
-          local-dir: ./                           # root of your repo
-          server-dir: ${{ secrets.FTP_SERVER_DIR }}  # e.g. /home/nscrm.com/public_html/
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          port: ${{ secrets.FTP_PORT }}
           protocol: ftp
+          local-dir: ./
+          server-dir: /home/nscrm.com/public_html/
+          dangerous-clean-slate: true
+          timeout: 60000
           exclude: |
             **/.git*
             **/.github/**
             node_modules/**
             vendor/**
-            .env
             README.md
