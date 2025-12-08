@@ -1,32 +1,29 @@
-name: 🚀 Auto Deploy to CyberPanel via FTP
+name: 🚀 Auto Deploy to Hostinger/CyberPanel via FTP
 
 on:
   push:
     branches:
-      - main
+      - main    # Deploy when pushing to main
 
 jobs:
   ftp-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Upload files via FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4
+      - name: Upload via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
         with:
-          server: ${{ secrets.FTP_HOST }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          port: ${{ secrets.FTP_PORT }}
-          # Your local project folder (root)
-          local-dir: ./
-          # Folder on hosting server
-          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          server: ${{ secrets.FTP_HOST }}         # e.g. 72.60.101.251
+          username: ${{ secrets.FTP_USERNAME }}   # your FTP username
+          password: ${{ secrets.FTP_PASSWORD }}   # your FTP password
+          port: ${{ secrets.FTP_PORT }}           # usually 21
+          local-dir: ./                           # root of your repo
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}  # e.g. /home/nscrm.com/public_html/
           protocol: ftp
-
-          # Optional exclusions
           exclude: |
             **/.git*
             **/.github/**
