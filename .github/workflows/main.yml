@@ -1,0 +1,46 @@
+name: 🚀 Auto Deploy to CyberPanel via FTP
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  ftp-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node (optional build step placeholder)
+        # remove or edit this step if you don't have a build step
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      # OPTIONAL: run build (uncomment if you need to build assets)
+      # - name: Install dependencies & build
+      #   run: |
+      #     npm ci
+      #     npm run build
+
+      - name: Upload files via FTP
+        uses: SamKirkland/[email protected]
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          port: ${{ secrets.FTP_PORT }}
+          local-dir: ./
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          protocol: ftp
+          # prevent uploading large or unnecessary directories
+          exclude: |
+            **/.git*
+            **/.github/**
+            node_modules/**
+            tests/**
+            .env
+            README.md
