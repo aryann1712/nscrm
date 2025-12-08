@@ -4,7 +4,7 @@
 <div class="row">
     <!--begin::Col-->
     <div class="col-lg-3 col-6">
-        <!--begin::Small Box Widget 1-->
+        <!--begin::Small Box Widget -->
         <div class="small-box text-bg-primary">
             <div class="inner">
                 <h3><?= $totalUsers ?></h3>
