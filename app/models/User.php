@@ -28,7 +28,8 @@ class User {
             'company_name' => 'VARCHAR(150) NULL',
             'is_owner' => 'TINYINT(1) NOT NULL DEFAULT 0',
             'owner_id' => 'INT NULL',
-            'last_login' => 'DATETIME NULL'
+            'last_login' => 'DATETIME NULL',
+            'type' => 'VARCHAR(20) NULL'
         ];
         
         foreach ($columns as $column => $definition) {
@@ -64,8 +65,9 @@ class User {
 
     public function getByOwner(int $ownerId): array {
       if ($this->conn === null) { throw new Exception("Database connection not available"); }
-      // Include both the owner and their sub-users (all rows with owner_id = :ownerId)
-      $stmt = $this->conn->prepare("SELECT id, name, email, is_owner, owner_id FROM {$this->table} WHERE owner_id = ? ORDER BY CASE WHEN is_owner=1 THEN 0 ELSE 1 END, name ASC, id ASC");
+      // Include both the owner and their sub-users (employees only, NOT customers)
+      // Customers have type='customer' and should be excluded from employee lists
+      $stmt = $this->conn->prepare("SELECT id, name, email, is_owner, owner_id FROM {$this->table} WHERE owner_id = ? AND (type IS NULL OR type != 'customer') ORDER BY CASE WHEN is_owner=1 THEN 0 ELSE 1 END, name ASC, id ASC");
       $stmt->execute([$ownerId]);
       return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
@@ -147,12 +149,16 @@ class User {
             throw new Exception("Database connection not available");
         }
         $hashed = password_hash($data['password'], PASSWORD_BCRYPT);
-        $stmt = $this->conn->prepare("INSERT INTO {$this->table} (name, email, phone, password, company_name, email_verified) VALUES (?, ?, ?, ?, ?, 0)");
+        $emailVerified = isset($data['email_verified']) ? (int)$data['email_verified'] : 0;
+        $userType = $data['type'] ?? null;
+        
+        $stmt = $this->conn->prepare("INSERT INTO {$this->table} (name, email, phone, password, company_name, email_verified, type) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $ok = $stmt->execute([
-            $data['name'], $data['email'], $data['phone'], $hashed, ($data['company_name'] ?? null)
+            $data['name'], $data['email'], $data['phone'], $hashed, ($data['company_name'] ?? null), $emailVerified, $userType
         ]);
         if (!$ok) { return false; }
         $newId = (int)$this->conn->lastInsertId();
+        
         // If owner_id provided in data and it's a valid existing owner, link to that owner as sub-user
         $providedOwnerId = isset($data['owner_id']) ? (int)$data['owner_id'] : 0;
         if ($providedOwnerId > 0 && $providedOwnerId !== $newId) {
@@ -161,11 +167,13 @@ class User {
                 $u->execute([$providedOwnerId, $newId]);
             } catch (Throwable $e) { /* ignore */ }
         } else {
-            // Default: Set owner_id to self and mark as owner
-            try {
-                $u = $this->conn->prepare("UPDATE {$this->table} SET owner_id = ?, is_owner = 1 WHERE id = ? AND (owner_id IS NULL OR owner_id = 0)");
-                $u->execute([$newId, $newId]);
-            } catch (Throwable $e) { /* ignore */ }
+            // Default: Set owner_id to self and mark as owner (only if not a customer)
+            if ($userType !== 'customer') {
+                try {
+                    $u = $this->conn->prepare("UPDATE {$this->table} SET owner_id = ?, is_owner = 1 WHERE id = ? AND (owner_id IS NULL OR owner_id = 0)");
+                    $u->execute([$newId, $newId]);
+                } catch (Throwable $e) { /* ignore */ }
+            }
         }
         return $newId;
     }
@@ -268,7 +276,8 @@ class User {
             throw new InvalidArgumentException('Owner not found');
         }
         $hashed = password_hash($data['password'], PASSWORD_BCRYPT);
-        $stmt = $this->conn->prepare("INSERT INTO {$this->table} (name, email, phone, password, company_name, email_verified, owner_id, is_owner) VALUES (?, ?, ?, ?, ?, ?, ?, 0)");
+        $userType = $data['type'] ?? null; // Employees have type=NULL, customers have type='customer'
+        $stmt = $this->conn->prepare("INSERT INTO {$this->table} (name, email, phone, password, company_name, email_verified, owner_id, is_owner, type) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)");
         $ok = $stmt->execute([
             $data['name'],
             $data['email'],
@@ -277,6 +286,7 @@ class User {
             $owner['company_name'] ?? null,
             $markEmailVerified ? 1 : 0,
             $ownerId,
+            $userType,
         ]);
         if (!$ok) { return false; }
         return (int)$this->conn->lastInsertId();
@@ -290,14 +300,17 @@ class User {
         if ($this->conn === null) {
             throw new Exception("Database connection not available");
         }
-        
-        if (isset($data['password']) && !empty($data['password'])) {
-            $stmt = $this->conn->prepare("UPDATE {$this->table} SET name = ?, email = ?, phone = ?, password = ? WHERE id = ?");
-            return $stmt->execute([$data['name'], $data['email'], $data['phone'], $data['password'], $id]);
-        } else {
-            $stmt = $this->conn->prepare("UPDATE {$this->table} SET name = ?, email = ?, phone = ? WHERE id = ?");
-            return $stmt->execute([$data['name'], $data['email'], $data['phone'], $id]);
+        $stmt = $this->conn->prepare("UPDATE {$this->table} SET name = ?, email = ?, phone = ? WHERE id = ?");
+        return $stmt->execute([$data['name'], $data['email'], $data['phone'], $id]);
+    }
+
+    public function updatePassword(int $id, string $hashedPassword): bool
+    {
+        if ($this->conn === null) {
+            throw new Exception("Database connection not available");
         }
+        $stmt = $this->conn->prepare("UPDATE {$this->table} SET password = ? WHERE id = ?");
+        return $stmt->execute([$hashedPassword, $id]);
     }
 
     public function delete($id) {

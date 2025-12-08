@@ -171,10 +171,17 @@ class Customer {
 
     public function getByEmail(string $email): ?array {
         $pdo = $this->db->getConnection();
+        // For customers logging in, use their owner_id from session
+        // For admins viewing, use their owner_id
         $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
-        if ($ownerId <= 0) { throw new Exception('Owner context missing'); }
-        $stmt = $pdo->prepare('SELECT * FROM customers WHERE owner_id = ? AND contact_email = ? LIMIT 1');
-        $stmt->execute([$ownerId, $email]);
+        if ($ownerId <= 0) { 
+            // If no owner_id, try to find by email only (for customer self-lookup)
+            $stmt = $pdo->prepare('SELECT * FROM customers WHERE contact_email = ? LIMIT 1');
+            $stmt->execute([$email]);
+        } else {
+            $stmt = $pdo->prepare('SELECT * FROM customers WHERE owner_id = ? AND contact_email = ? LIMIT 1');
+            $stmt->execute([$ownerId, $email]);
+        }
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row !== false ? $row : null;
     }

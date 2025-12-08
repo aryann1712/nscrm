@@ -135,6 +135,11 @@
             height: 20px !important;
             border-radius: 0.375rem !important;
         }
+
+        body.fade-out {
+            opacity: 0;
+            transition: opacity 0.4s ease;
+        }
     </style>
     <?php
     // Hide chrome (nav/sidebar/breadcrumbs) on auth page or when not logged in
@@ -307,7 +312,7 @@
                             <!--begin::Menu Footer-->
                             <li class="user-footer">
                                 <a href="#" class="btn btn-default btn-flat">Profile</a>
-                                <a href="#" class="btn btn-default btn-flat float-end">Sign out</a>
+                                <a href="#" class="btn btn-default btn-flat float-end" onclick="logout(); return false;">Sign out</a>
                             </li>
                             <!--end::Menu Footer-->
                         </ul>
@@ -712,11 +717,14 @@ function showHelp() {
 
 function logout() {
     if (confirm('Are you sure you want to logout?')) {
-        // Clear any session data
-        localStorage.clear();
-        sessionStorage.clear();
-        // Redirect to server-side logout
-        window.location.href = '/?action=auth&subaction=logout';
+        try {
+            localStorage.clear();
+            sessionStorage.clear();
+        } catch (e) {}
+        document.body.classList.add('fade-out');
+        setTimeout(function() {
+            window.location.href = '/?action=auth&subaction=logout';
+        }, 400);
     }
 }
 </script>

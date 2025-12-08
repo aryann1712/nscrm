@@ -290,4 +290,20 @@
   })();
  </script>
 
+ <script>
+ // Row click opens the same preview/edit dialog as the Edit button
+ document.addEventListener('DOMContentLoaded', function(){
+   const table = document.querySelector('.table.table-striped.table-hover');
+   if (!table) return;
+   table.addEventListener('click', function(e){
+     // ignore clicks on controls
+     if (e.target.closest('a,button,.dropdown-menu,.dropdown-toggle,.form-check-input')) return;
+     const tr = e.target.closest('tbody tr');
+     if (!tr) return;
+     const trigger = tr.querySelector('.btn-edit-preview');
+     if (trigger) trigger.click();
+   });
+ });
+ </script>
+
 <?php $content = ob_get_clean(); include __DIR__ . '/../layout.php'; ?>

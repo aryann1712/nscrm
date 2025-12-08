@@ -46,14 +46,14 @@
             <div class="row">
                 <!-- Left Column -->
                 <div class="col-md-8">
-                    <!-- Users Panel -->
+                    <!-- Company Employees Panel -->
                     <div class="card">
                         <div class="card-header">
                             <div class="d-flex justify-content-between align-items-center">
-                                <h3 class="card-title">Users (<?= $totalUsers ?>/<?= $maxUsers ?>)</h3>
+                                <h3 class="card-title">Company Employees (<?= $totalUsers ?>/<?= $maxUsers ?>)</h3>
                                 <div>
                                     <a href="/?action=settings&subaction=create" class="btn btn-warning btn-sm">
-                                        <i class="bi bi-plus"></i> Add User
+                                        <i class="bi bi-plus"></i> Add Employee
                                     </a>
                                     <button class="btn btn-outline-secondary btn-sm" onclick="toggleUsersPanel()">
                                         <i class="bi bi-chevron-up"></i>

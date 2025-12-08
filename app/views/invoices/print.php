@@ -1,11 +1,9 @@
 <?php
-// Variables available: $row (quotation), $items (array), $terms (array)
+// Variables available: $row (invoice), $items (array), $terms (array)
 // Simplified printable view. Use browser's Print to save as PDF.
-// Also used by Dompdf -> prefer absolute URLs for remote assets
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 $baseUrl = $scheme . '://' . $host;
-// Prepare signature source: for PDF, embed as base64 if available; for browser use URL
 $signatureData = null;
 $signatureUrl = $baseUrl . '/uploads/settings/signature.png';
 $sigFsPath = dirname(__DIR__, 3) . '/public/uploads/settings/signature.png';
@@ -20,7 +18,7 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Quotation #<?= htmlspecialchars($row['quote_no']) ?> - <?= htmlspecialchars($row['customer']) ?></title>
+  <title>Invoice #<?= htmlspecialchars($row['invoice_no']) ?> - <?= htmlspecialchars($row['customer']) ?></title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <?php if (empty($forPdf)): ?>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
@@ -35,21 +33,18 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
     table.table-sm th, table.table-sm td { padding: .25rem .5rem; }
     .sig { height: 64px; }
     .logo { height: 64px; }
-    .waterline { font-size: 11px; color: #555; }
     .summary-table td, .summary-table th { padding: .3rem .5rem; }
-    /* Watermark using header image */
     .doc::before {
       content: '';
       position: absolute;
       inset: 0;
       background: url('<?= htmlspecialchars($baseUrl) ?>/uploads/settings/print_header.png') no-repeat center center;
-      background-size middle; /* visible all over */
-      opacity: 0.06; /* light so it doesn't block text */
+      background-size: contain;
+      opacity: 0.06;
       pointer-events: none;
       z-index: 0;
     }
     .doc > * { position: relative; z-index: 1; }
-    /* Ensure content blocks remain fully readable over watermark */
     .doc .box, .doc table { background-color: #ffffff; }
   </style>
 </head>
@@ -60,22 +55,21 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
         <img class="logo" src="<?= htmlspecialchars($baseUrl) ?>/uploads/settings/print_header.png" alt="Logo" onerror="this.style.display='none'"/>
       </div>
       <div class="text-end small" style="min-width:260px;">
-        <div class="fw-bold" style="font-size:16px; white-space:normal;"><?= htmlspecialchars($settings['basic_company'] ?? 'NS Technology ') ?></div>
+        <div class="fw-bold" style="font-size:16px;"><?= htmlspecialchars($settings['basic_company'] ?? 'NS Technology') ?></div>
         <div><?= htmlspecialchars(($settings['basic_city'] ?? '') . (empty($settings['basic_state'])?'':(', ' . $settings['basic_state']))) ?></div>
         <?php if (!empty($settings['basic_gstin'])): ?>
           <div>GSTIN: <?= htmlspecialchars($settings['basic_gstin']) ?></div>
         <?php endif; ?>
         <div class="mt-2 small">
-          <div><span class="text-muted">Quotation No.:</span> <strong><?= htmlspecialchars($row['quote_no']) ?></strong></div>
+          <div><span class="text-muted">Invoice No.:</span> <strong><?= htmlspecialchars($row['invoice_no']) ?></strong></div>
           <div><span class="text-muted">Date:</span> <strong><?= htmlspecialchars($row['issued_on'] ?? date('Y-m-d')) ?></strong></div>
-          <?php if(!empty($row['valid_till'])): ?><div><span class="text-muted">Valid till:</span> <strong><?= htmlspecialchars($row['valid_till']) ?></strong></div><?php endif; ?>
           <?php if(!empty($row['contact_person'])): ?><div><span class="text-muted">Contact Person:</span> <strong><?= htmlspecialchars($row['contact_person']) ?></strong></div><?php endif; ?>
           <?php if(!empty($row['issued_by'])): ?><div><span class="text-muted">Issued By:</span> <strong><?= htmlspecialchars($row['issued_by']) ?></strong></div><?php endif; ?>
         </div>
       </div>
     </div>
 
-    <h1 class="text-center mb-3">QUOTATION</h1>
+    <h1 class="text-center mb-3">TAX INVOICE</h1>
 
     <div class="row g-2 mb-2">
       <div class="col-6">
@@ -111,7 +105,6 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
       </thead>
       <tbody>
         <?php
-          // Helpers
           $num = function($v,$d=2){ return number_format((float)$v,$d); };
           $n=0; $totalTaxable=0.0; $perItemGstTotal=0.0; $hasItemDisc=false; $hasItemGst=false;
           foreach ($items as $it) {
@@ -130,7 +123,7 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
             if ($gstIncluded && $gstPct > 0) {
               $taxable = $lineGross / (1 + ($gstPct/100));
               $itemGst = $lineGross - $taxable;
-              $amount = $lineGross; // already inclusive
+              $amount = $lineGross;
             } else {
               $taxable = $lineGross;
               $itemGst = $taxable * ($gstPct/100);
@@ -162,34 +155,15 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
     </table>
 
     <?php
-      $freight = 0.0; // Freight removed
       $overallDiscInput = (float)($row['overall_discount'] ?? 0);
-      $overallGstPctInput = (float)($row['overall_gst_pct'] ?? 0);
-      // Business rules
-      $effectiveOverallDiscount = ($hasItemDisc || $hasItemGst) ? 0.0 : $overallDiscInput;
-      $effectiveOverallGstPct = ($hasItemDisc || $hasItemGst) ? 0.0 : $overallGstPctInput;
-      // Subtotal before GST = (Total Taxable + Freight) - Overall Discount
-      $baseBeforeDiscount = max(0.0, $totalTaxable + $freight);
-      $subtotalBeforeGst = max(0.0, $baseBeforeDiscount - $effectiveOverallDiscount);
-      // GST
-      $overallGst = $subtotalBeforeGst * ($effectiveOverallGstPct/100.0);
-      $totalTax = $overallGst + $perItemGstTotal;
-      // Grand total
+      $baseBeforeDiscount = max(0.0, $totalTaxable);
+      $subtotalBeforeGst = max(0.0, $baseBeforeDiscount - $overallDiscInput);
+      $totalTax = $perItemGstTotal;
       $grand = $subtotalBeforeGst + $totalTax;
-    
-      // Amount in words (simple Indian format)
+      
       function inr_words($number) {
         $no = floor($number);
         $point = round($number - $no, 2) * 100;
-        $hundred = null;
-        $digits_1 = array('', 'Hundred','Thousand','Lakh','Crore');
-        $divisors = [100, 1000, 100000, 10000000];
-        $str = [];
-        for ($i=0,$j=0; $i < count($divisors); $i++, $j++) {
-          $divider = $divisors[$i];
-          if ($no >= $divider) continue; // find starting divider
-        }
-        // Build words
         $words = array(
           0 => '', 1 => 'One', 2 => 'Two', 3 => 'Three', 4 => 'Four', 5 => 'Five', 6 => 'Six', 7 => 'Seven', 8 => 'Eight', 9 => 'Nine',
           10 => 'Ten', 11 => 'Eleven', 12 => 'Twelve', 13 => 'Thirteen', 14 => 'Fourteen', 15 => 'Fifteen', 16 => 'Sixteen', 17 => 'Seventeen', 18 => 'Eighteen', 19 => 'Nineteen',
@@ -201,7 +175,7 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
         $digits[] = $n % 1000; $n = (int)($n/1000);
         $digits[] = $n % 100;  $n = (int)($n/100);
         $digits[] = $n % 100;  $n = (int)($n/100);
-        $digits[] = $n % 100;  // Crore level (approx)
+        $digits[] = $n % 100;
         $text = [];
         for($i=0;$i<count($digits);$i++){
           $num = $digits[$i]; if($num==0) continue;
@@ -228,9 +202,8 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
                 <li><?= htmlspecialchars(is_array($t)?($t['text'] ?? ''):$t) ?></li>
               <?php endforeach; ?>
             <?php else: ?>
-              <li>Prices are exclusive of taxes unless specified.</li>
-              <li>Warranty as per manufacturer policy.</li>
-              <li>Delivery subject to availability.</li>
+              <li>Payment due within 30 days.</li>
+              <li>Late payment charges may apply.</li>
             <?php endif; ?>
           </ol>
         </div>
@@ -247,11 +220,14 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
       <div class="col-5">
         <table class="table table-bordered table-sm mb-0 summary-table">
           <tr><th class="small">Total Taxable</th><td class="text-end small"><?= number_format($totalTaxable,2) ?></td></tr>
-          <tr><th class="small">Less: Overall Discount</th><td class="text-end small">-<?= number_format($effectiveOverallDiscount,2) ?></td></tr>
-          <tr><th class="small">Subtotal (before GST)</th><td class="text-end small"><?= number_format($subtotalBeforeGst,2) ?></td></tr>
-          <tr><th class="small">GST %</th><td class="text-end small"><?= number_format($effectiveOverallGstPct,2) ?>%</td></tr>
-          <tr><th class="small">GST Total (Overall + Per-item)</th><td class="text-end small"><?= number_format($totalTax,2) ?></td></tr>
+          <tr><th class="small">Less: Discount</th><td class="text-end small">-<?= number_format($overallDiscInput,2) ?></td></tr>
+          <tr><th class="small">Subtotal</th><td class="text-end small"><?= number_format($subtotalBeforeGst,2) ?></td></tr>
+          <tr><th class="small">GST Total</th><td class="text-end small"><?= number_format($totalTax,2) ?></td></tr>
           <tr class="table-light"><th class="small">Grand Total</th><td class="text-end fw-semibold small"><?= number_format($grand,2) ?></td></tr>
+          <?php if (!empty($row['received_amount']) && (float)$row['received_amount'] > 0): ?>
+          <tr><th class="small">Received Amount</th><td class="text-end small"><?= number_format((float)$row['received_amount'],2) ?></td></tr>
+          <tr><th class="small">Balance</th><td class="text-end small"><?= number_format($grand - (float)$row['received_amount'],2) ?></td></tr>
+          <?php endif; ?>
         </table>
       </div>
     </div>
@@ -284,15 +260,6 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
   <?php if (empty($forPdf)): ?>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <?php endif; ?>
-  <script>
-    (function(){
-      try {
-        const url = new URL(window.location.href);
-        if (url.searchParams.get('auto') === '1' && !<?= isset($forPdf) ? 'true' : 'false' ?>) {
-          setTimeout(function(){ window.print(); }, 400);
-        }
-      } catch(e) {}
-    })();
-  </script>
 </body>
 </html>
+

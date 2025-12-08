@@ -48,7 +48,7 @@ class InventoryStore {
         if (!$rows) return [];
         $ids = array_column($rows, 'id');
         $in = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $pdo->prepare("SELECT su.store_id, u.id, u.name FROM inventory_store_users su JOIN users u ON u.id = su.user_id WHERE su.owner_id = ? AND su.store_id IN ($in) ORDER BY u.name");
+        $stmt = $pdo->prepare("SELECT su.store_id, u.id, u.name FROM inventory_store_users su JOIN users u ON u.id = su.user_id WHERE su.owner_id = ? AND su.store_id IN ($in) AND (u.type IS NULL OR u.type != 'customer') ORDER BY u.name");
         $stmt->execute(array_merge([$ownerId], $ids));
         $map = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -66,7 +66,7 @@ class InventoryStore {
         $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
         if ($ownerId <= 0) { throw new Exception('Owner context missing'); }
         $pdo = $this->db->getConnection();
-        $stmt = $pdo->prepare("SELECT id, name FROM users WHERE owner_id = ? ORDER BY is_owner DESC, name");
+        $stmt = $pdo->prepare("SELECT id, name FROM users WHERE owner_id = ? AND (type IS NULL OR type != 'customer') ORDER BY is_owner DESC, name");
         $stmt->execute([$ownerId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }

@@ -33,6 +33,11 @@
             padding: 0.5rem 1rem !important;
             margin-top: 1rem !important;
         }
+
+        body.fade-out {
+            opacity: 0;
+            transition: opacity 0.4s ease;
+        }
     </style>
 </head>
 <body class="layout-fixed sidebar-expand-lg sidebar-open bg-body-tertiary">
@@ -51,7 +56,7 @@
                 </ul>
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
-                        <a href="/?action=auth&subaction=logout" class="nav-link">
+                        <a href="/?action=auth&subaction=logout" class="nav-link" id="customerLogoutLink">
                             <i class="bi bi-box-arrow-right"></i> <span class="d-none d-md-inline">Logout</span>
                         </a>
                     </li>
@@ -140,45 +145,65 @@
     <script src="/dist/js/adminlte.min.js"></script>
     <script>
     function showSection(section) {
-        // Hide all sections
+        const originalSection = section;
+
+        // Hide all section panes
         document.querySelectorAll('.tab-pane, .section-content').forEach(pane => {
             pane.classList.remove('show', 'active');
             pane.style.display = 'none';
         });
+
         // Remove active from all sidebar nav links
         document.querySelectorAll('.sidebar-menu .nav-link').forEach(link => {
             link.classList.remove('active');
         });
-        
-        // Handle dashboard section (show welcome card, hide others)
-        const welcomeCardRow = document.querySelector('.row:first-child');
-        if (section === 'dashboard') {
-            if (welcomeCardRow) {
-                welcomeCardRow.style.display = 'block';
-            }
-        } else {
-            // Show selected section
-            const targetPane = document.getElementById(section);
-            const targetLink = document.querySelector(`.sidebar-menu a[href="#${section}"]`);
-            if (targetPane) {
-                targetPane.classList.add('show', 'active');
-                targetPane.style.display = 'block';
-            }
-            if (targetLink) {
-                targetLink.classList.add('active');
-            }
-            // Hide welcome card when showing other sections
-            if (welcomeCardRow) {
-                welcomeCardRow.style.display = 'none';
-            }
+
+        // Show selected section
+        const targetPane = document.getElementById(section);
+        if (targetPane) {
+            targetPane.classList.add('show', 'active');
+            targetPane.style.display = 'block';
         }
-        
-        // Set active link
+
+        // Mark corresponding nav link active
         const targetLink = document.querySelector(`.sidebar-menu a[href="#${section}"]`);
         if (targetLink) {
             targetLink.classList.add('active');
         }
+
+        // Persist last selected section for next reload
+        try {
+            localStorage.setItem('customerActiveSection', originalSection);
+        } catch (e) {}
     }
+
+    // Restore last active section on load (default to dashboard/quotes)
+    document.addEventListener('DOMContentLoaded', function() {
+        let section = 'dashboard';
+        try {
+            const stored = localStorage.getItem('customerActiveSection');
+            if (stored) {
+                section = stored;
+            }
+        } catch (e) {}
+        showSection(section);
+    });
+
+    // Animated logout for customer panel
+    document.getElementById('customerLogoutLink')?.addEventListener('click', function(e) {
+        e.preventDefault();
+        if (!confirm('Are you sure you want to logout?')) {
+            return;
+        }
+        try {
+            localStorage.clear();
+            sessionStorage.clear();
+        } catch (err) {}
+        document.body.classList.add('fade-out');
+        setTimeout(function() {
+            window.location.href = '/?action=auth&subaction=logout';
+        }, 400);
+    });
     </script>
 </body>
 </html>

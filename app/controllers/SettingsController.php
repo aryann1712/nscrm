@@ -33,11 +33,13 @@ class SettingsController {
         }
         $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
         $pdo = (new Database())->getConnection();
-        $stmt = $pdo->prepare('SELECT id, name, email, phone, is_owner, email_verified FROM users WHERE owner_id = ? ORDER BY is_owner DESC, id ASC');
+        // IMPORTANT: Only show company employees (users), NOT customers
+        // Customers have type='customer', employees have type IS NULL or type != 'customer'
+        $stmt = $pdo->prepare("SELECT id, name, email, phone, is_owner, email_verified, type FROM users WHERE owner_id = ? AND (type IS NULL OR type != 'customer') ORDER BY is_owner DESC, id ASC");
         $stmt->execute([$ownerId]);
         $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $totalUsers = is_array($users) ? count($users) : 0;
-        $maxUsers = 10; // Maximum allowed users
+        $maxUsers = 10; // Maximum allowed users (employees only)
         
         require_once __DIR__ . '/../views/settings/index.php';
     }
@@ -64,7 +66,7 @@ class SettingsController {
                 throw new Exception("All fields are required.");
             }
             
-            // Check if email already exists within this tenant
+            // Check if email already exists within this tenant (check both employees and customers)
             $pdo = (new Database())->getConnection();
             $chk = $pdo->prepare('SELECT id FROM users WHERE owner_id = ? AND email = ? LIMIT 1');
             $chk->execute([$ownerId, trim($_POST['email'])]);
@@ -78,11 +80,18 @@ class SettingsController {
                 'email' => trim($_POST['email']),
                 'phone' => trim($_POST['phone']),
                 // Pass plain password; model will hash
-                'password' => (string)$_POST['password']
+                'password' => (string)$_POST['password'],
+                'type' => null // Employee (not a customer)
             ];
             
-            // Create sub-user under current owner; mark email as verified for immediate access
+            // Create sub-user (employee) under current owner; mark email as verified for immediate access
+            // Note: createSubUser doesn't set type, so we need to ensure it's not a customer
             $newUserId = $user->createSubUser($data, $ownerId, true);
+            
+            // Ensure the new user is NOT marked as customer
+            if ($newUserId) {
+                $pdo->prepare("UPDATE users SET type = NULL WHERE id = ? AND (type = 'customer' OR type IS NULL)")->execute([$newUserId]);
+            }
             
             if ($newUserId) {
                 $_SESSION['success_message'] = "User created successfully!";
@@ -108,7 +117,8 @@ class SettingsController {
         
         $pdo = (new Database())->getConnection();
         $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
-        $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? AND owner_id = ? LIMIT 1');
+        // Only allow editing employees, not customers
+        $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ? AND owner_id = ? AND (type IS NULL OR type != 'customer') LIMIT 1");
         $stmt->execute([$id, $ownerId]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$user) {
@@ -129,13 +139,13 @@ class SettingsController {
         
         try {
             $id = $_POST['id'];
-            // Ensure the target user belongs to this owner
+            // Ensure the target user belongs to this owner AND is an employee (not a customer)
             $pdo = (new Database())->getConnection();
-            $chk = $pdo->prepare('SELECT id, is_owner FROM users WHERE id = ? AND owner_id = ?');
+            $chk = $pdo->prepare("SELECT id, is_owner FROM users WHERE id = ? AND owner_id = ? AND (type IS NULL OR type != 'customer')");
             $chk->execute([$id, $ownerId]);
             $target = $chk->fetch(PDO::FETCH_ASSOC);
             if (!$target) {
-                throw new Exception('User not found');
+                throw new Exception('User not found or cannot edit customers here');
             }
             $data = [
                 'name' => $_POST['name'],
@@ -165,10 +175,11 @@ class SettingsController {
         try {
             $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
             $pdo = (new Database())->getConnection();
-            $chk = $pdo->prepare('SELECT id, is_owner FROM users WHERE id = ? AND owner_id = ?');
+            // Only allow deleting employees, not customers (customers should be deleted from Customers section)
+            $chk = $pdo->prepare("SELECT id, is_owner FROM users WHERE id = ? AND owner_id = ? AND (type IS NULL OR type != 'customer')");
             $chk->execute([$id, $ownerId]);
             $target = $chk->fetch(PDO::FETCH_ASSOC);
-            if (!$target) { throw new Exception('User not found'); }
+            if (!$target) { throw new Exception('User not found or cannot delete customers here'); }
             if ((int)($target['is_owner'] ?? 0) === 1) { throw new Exception('Cannot delete the owner account'); }
             $this->user->delete((int)$id);
         } catch (Exception $e) {

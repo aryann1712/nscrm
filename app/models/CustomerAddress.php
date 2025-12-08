@@ -42,8 +42,16 @@ class CustomerAddress {
     public function listByCustomer(int $customerId): array {
         $pdo = $this->db->getConnection();
         $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
-        $stmt = $pdo->prepare('SELECT * FROM customers_addresses WHERE customer_id = ? AND (owner_id = ? OR owner_id IS NULL) ORDER BY id DESC');
-        $stmt->execute([$customerId, $ownerId]);
+        // For customers, allow them to see their own addresses
+        // For admins, filter by owner_id
+        if ($ownerId > 0) {
+            $stmt = $pdo->prepare('SELECT * FROM customers_addresses WHERE customer_id = ? AND (owner_id = ? OR owner_id IS NULL) ORDER BY id DESC');
+            $stmt->execute([$customerId, $ownerId]);
+        } else {
+            // Customer viewing their own addresses (no owner_id filter)
+            $stmt = $pdo->prepare('SELECT * FROM customers_addresses WHERE customer_id = ? ORDER BY id DESC');
+            $stmt->execute([$customerId]);
+        }
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

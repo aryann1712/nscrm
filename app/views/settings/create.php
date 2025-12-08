@@ -5,13 +5,13 @@
         <div class="container-fluid">
             <div class="row mb-2">
                 <div class="col-sm-6">
-                    <h1 class="m-0">Add User</h1>
+                    <h1 class="m-0">Add Company Employee</h1>
                 </div>
                 <div class="col-sm-6">
                     <ol class="breadcrumb float-sm-right">
                         <li class="breadcrumb-item"><a href="/?action=dashboard">Home</a></li>
                         <li class="breadcrumb-item"><a href="/?action=settings">Settings</a></li>
-                        <li class="breadcrumb-item active">Add User</li>
+                        <li class="breadcrumb-item active">Add Employee</li>
                     </ol>
                 </div>
             </div>
@@ -24,7 +24,8 @@
                 <div class="col-md-8">
                     <div class="card">
                         <div class="card-header">
-                            <h3 class="card-title">Create New User</h3>
+                            <h3 class="card-title">Create New Company Employee</h3>
+                            <p class="text-muted mb-0"><small>Note: This is for company employees only. Customers are managed separately in the Customers section.</small></p>
                         </div>
                         <div class="card-body">
                             <form action="/?action=settings&subaction=store" method="POST">
@@ -62,7 +63,7 @@
                                         <i class="bi bi-arrow-left me-1"></i> Back to Settings
                                     </a>
                                     <button type="submit" class="btn btn-warning">
-                                        <i class="bi bi-save me-1"></i> Create User
+                                        <i class="bi bi-save me-1"></i> Create Employee
                                     </button>
                                 </div>
                             </form>

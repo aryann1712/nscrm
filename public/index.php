@@ -6,6 +6,11 @@ if (is_file($autoload)) { require_once $autoload; }
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+
+// If session user is in an invalid/partial state (no id), treat as logged out to avoid redirect loops
+if (isset($_SESSION['user']) && empty($_SESSION['user']['id'])) {
+    unset($_SESSION['user']);
+}
 require_once __DIR__ . '/../app/controllers/UserController.php';
 require_once __DIR__ . '/../app/controllers/InventoryController.php';
 require_once __DIR__ . '/../app/controllers/QuotationController.php';
@@ -32,6 +37,48 @@ $id = $_GET['id'] ?? null;
 if (!isset($_SESSION['user']) && $action !== 'auth') {
     header('Location: /?action=auth');
     exit;
+}
+
+// Protect admin routes from customers
+$userType = $_SESSION['user']['type'] ?? null;
+$isOwner = (int)($_SESSION['user']['is_owner'] ?? 0);
+$isCustomer = ($userType === 'customer' || ($userType === null && $isOwner === 0));
+
+// Customer-accessible subactions in admin routes (for JSON endpoints)
+$customerAllowedSubactions = [
+    'getQuotationDetails',
+    'getInvoiceDetails',
+    'getOrderDetails',
+    'printQuotation',
+    'printInvoice',
+    'printOrder',
+    'updateCustomerDetails',
+    'changePassword',
+    'createSupportTicket',
+    'listSupportTickets',
+    // Customer address management
+    'listAddresses',
+    'createAddress',
+    'updateAddress',
+    'deleteAddress',
+    // Customer support chat
+    'listTicketMessages',
+    'addTicketMessage',
+];
+
+// Admin-only routes that customers cannot access
+$adminOnlyRoutes = ['dashboard', 'inventory', 'quotations', 'orders', 'invoices', 'crm', 'customers', 'settings', 'accounts', 'purchases', 'purchaseOrders', 'manufacturing', 'tasks', 'recovery', 'contracts', 'support', 'store', 'salesConfig'];
+
+if ($isCustomer && in_array($action, $adminOnlyRoutes) && $action !== 'customer_dashboard') {
+    // Allow customer-specific subactions in customers route (JSON endpoints)
+    if ($action === 'customers' && !empty($subaction) && in_array($subaction, $customerAllowedSubactions)) {
+        // Allow this - customer accessing their own data endpoints, continue to route handler
+        // No redirect needed
+    } else {
+        // Customer trying to access admin route, redirect to their dashboard
+        header('Location: /?action=customer_dashboard');
+        exit;
+    }
 }
 
 // Handle inventory actions
@@ -460,7 +507,23 @@ if ($action === 'inventory') {
     $controller->index();
 } elseif ($action === 'support') {
     $controller = new SupportController();
-    $controller->index();
+    switch ($subaction) {
+        case 'listTickets':
+            $controller->listTickets();
+            break;
+        case 'updateStatus':
+            $controller->updateStatus();
+            break;
+        case 'listMessages':
+            $controller->listMessages();
+            break;
+        case 'addMessage':
+            $controller->addMessage();
+            break;
+        default:
+            $controller->index();
+            break;
+    }
 } elseif ($action === 'accounts') {
     $controller = new AccountsController();
     $controller->index();
@@ -529,6 +592,75 @@ if ($action === 'inventory') {
             break;
         case 'changePassword':
             $controller->changePassword();
+            break;
+        case 'printQuotation':
+            $id = (int)($_GET['id'] ?? 0);
+            if ($id > 0) {
+                $controller->printQuotation($id);
+            } else {
+                header('Location: /?action=customer_dashboard');
+            }
+            break;
+        case 'printInvoice':
+            $id = (int)($_GET['id'] ?? 0);
+            if ($id > 0) {
+                $controller->printInvoice($id);
+            } else {
+                header('Location: /?action=customer_dashboard');
+            }
+            break;
+        case 'printOrder':
+            $id = (int)($_GET['id'] ?? 0);
+            if ($id > 0) {
+                $controller->printOrder($id);
+            } else {
+                header('Location: /?action=customer_dashboard');
+            }
+            break;
+        case 'getQuotationDetails':
+            $id = (int)($_GET['id'] ?? 0);
+            if ($id > 0) {
+                $controller->getQuotationDetails($id);
+            } else {
+                http_response_code(400);
+                header('Content-Type: application/json');
+                echo json_encode(['error'=>'Invalid ID']);
+                exit;
+            }
+            break;
+        case 'getInvoiceDetails':
+            $id = (int)($_GET['id'] ?? 0);
+            if ($id > 0) {
+                $controller->getInvoiceDetails($id);
+            } else {
+                http_response_code(400);
+                header('Content-Type: application/json');
+                echo json_encode(['error'=>'Invalid ID']);
+                exit;
+            }
+            break;
+        case 'getOrderDetails':
+            $id = (int)($_GET['id'] ?? 0);
+            if ($id > 0) {
+                $controller->getOrderDetails($id);
+            } else {
+                http_response_code(400);
+                header('Content-Type: application/json');
+                echo json_encode(['error'=>'Invalid ID']);
+                exit;
+            }
+            break;
+        case 'createSupportTicket':
+            $controller->createSupportTicket();
+            break;
+        case 'listSupportTickets':
+            $controller->listSupportTickets();
+            break;
+        case 'listTicketMessages':
+            $controller->listTicketMessages();
+            break;
+        case 'addTicketMessage':
+            $controller->addTicketMessage();
             break;
         default:
             $controller->index();
