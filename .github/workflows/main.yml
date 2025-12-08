@@ -4,18 +4,16 @@ on:
   push:
     branches:
       - main
-      
 
 jobs:
   ftp-deploy:
-    name: FTP Deploy
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Upload to Hostinger
+      - name: Deploy to Hostinger FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.6
         with:
           server: ${{ secrets.FTP_HOST }}
@@ -23,13 +21,17 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           port: ${{ secrets.FTP_PORT }}
           protocol: ftp
+          
+          # Upload only contents, not folder
           local-dir: ./
-          server-dir: /home/nscrm.com/public_html/
+          
+          # 👇 FIX: use relative path
+          server-dir: ./
+          
           dangerous-clean-slate: true
           timeout: 60000
           exclude: |
             **/.git*
             **/.github/**
             node_modules/**
-            vendor/**
             README.md
