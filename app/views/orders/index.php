@@ -26,7 +26,30 @@
       <div class="col-sm-3">
         <label class="form-label">Status</label>
         <select name="status" class="form-select">
-          <?php $statuses = ['', 'Pending', 'Received', 'Bill Submitted', 'Delivered'];
+          <?php
+          $statuses = [
+            '',
+            'Purchase order / Work Order Received',
+            'Purchase order / Work Order Sent',
+            'Advance Payment Received',
+            'Advance Payment Sent',
+            'Material Arrangement in process',
+            'Material Dispatched',
+            'Material Delivered',
+            'Material Received',
+            'Complete Payment Done',
+            'Installation Start',
+            'Installation is going on',
+            'Installation is completed',
+            'Project is handover to the client',
+            'Bill Submitted',
+            'Final Payment Received',
+            'WIP',
+            'Query',
+            'Packed',
+            'Cancelled',
+            'Done',
+          ];
           foreach ($statuses as $st): ?>
             <option value="<?= htmlspecialchars($st) ?>" <?= (($_GET['status'] ?? '')===$st?'selected':'') ?>>
               <?= $st===''?'All':htmlspecialchars($st) ?>
@@ -163,14 +186,17 @@
             <td><?= number_format((float)($o['first_item_done_qty'] ?? 0), 0) ?></td>
             <td><?= htmlspecialchars((string)($o['first_item_unit'] ?? '')) ?></td>
             <td><?= number_format((float)($o['total'] ?? 0), 2) ?></td>
-            <td><span class="badge text-bg-secondary order-status" data-id="<?= (int)$o['id'] ?>"><?= htmlspecialchars((string)($o['status'] ?? '')) ?></span></td>
-            <td class="text-nowrap">
-              <button type="button" class="btn btn-sm btn-outline-success me-1 btn-cycle-status" data-id="<?= (int)$o['id'] ?>" data-status="<?= htmlspecialchars((string)($o['status'] ?? 'Pending')) ?>" title="Update status">
+            <td><span class="badge order-status" data-id="<?= (int)$o['id'] ?>"><?= htmlspecialchars((string)($o['status'] ?? '')) ?></span></td>
+            <td class="text-nowrap d-flex gap-1">
+              <button type="button" class="btn btn-sm btn-outline-success btn-cycle-status" data-id="<?= (int)$o['id'] ?>" data-status="<?= htmlspecialchars((string)($o['status'] ?? 'Pending')) ?>" title="Update status">
                 <i class="bi bi-arrow-repeat"></i>
               </button>
               <a class="btn btn-sm btn-outline-warning btn-edit-preview" href="#" data-id="<?= (int)$o['id'] ?>" title="Edit">
                 <i class="bi bi-pencil"></i>
               </a>
+              <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" onclick="return deleteOrder(<?= (int)$o['id'] ?>)">
+                <i class="bi bi-trash"></i>
+              </button>
             </td>
           </tr>
         <?php endforeach; endif; ?>
@@ -192,6 +218,10 @@
         <div class="mb-2 text-muted" id="opmId"></div>
         <div class="d-flex flex-wrap gap-2 mb-3" id="opmChips"></div>
         <div class="d-flex flex-wrap gap-2 mb-3" id="opmAmounts"></div>
+        <div class="d-flex align-items-center gap-2 mb-3">
+          <span id="opmStatusBadge" class="badge"></span>
+          <select id="opmStatusSelect" class="form-select form-select-sm" style="max-width:260px"></select>
+        </div>
         <div class="d-flex flex-wrap gap-3" id="opmActions">
           <a href="#" id="opmEdit" class="btn btn-outline-warning"><i class="bi bi-pencil me-1"></i>Edit</a>
           <a href="#" id="opmPrint" class="btn btn-outline-warning"><i class="bi bi-printer me-1"></i>Print</a>
@@ -206,7 +236,35 @@
 
 <script>
   (function(){
-    const STATUSES = ['Pending','Received','Bill Submitted','Delivered'];
+    const STATUSES = [
+      'Purchase order / Work Order Received',
+      'Purchase order / Work Order Sent',
+      'Advance Payment Received',
+      'Advance Payment Sent',
+      'Material Arrangement in process',
+      'Material Dispatched',
+      'Material Delivered',
+      'Material Received',
+      'Complete Payment Done',
+      'Installation Start',
+      'Installation is going on',
+      'Installation is completed',
+      'Project is handover to the client',
+      'Bill Submitted',
+      'Final Payment Received',
+      'WIP',
+      'Query',
+      'Packed',
+      'Cancelled',
+      'Done',
+    ];
+    function statusBadgeClass(status){
+      const s = String(status||'').toLowerCase();
+      if (!s) return '';
+      if (s.includes('cancel')) return 'bg-danger text-light';
+      if (s.includes('done')) return 'bg-success text-light';
+      return '';
+    }
     function nextStatus(cur){
       const i = STATUSES.indexOf(cur||'');
       return STATUSES[(i >= 0 ? (i+1) : 0) % STATUSES.length];
@@ -221,6 +279,14 @@
       if (json && json.success === false) throw new Error('Failed');
       return true;
     }
+    function applyStatusBadge(el, status){
+      if (!el) return;
+      el.textContent = status || '';
+      el.className = 'badge order-status ' + statusBadgeClass(status);
+    }
+    document.querySelectorAll('.order-status').forEach(badge=>{
+      applyStatusBadge(badge, badge.textContent.trim());
+    });
     document.querySelectorAll('.btn-cycle-status').forEach(btn=>{
       btn.addEventListener('click', async()=>{
         const id = btn.getAttribute('data-id');
@@ -230,7 +296,7 @@
         btn.disabled = true;
         try{
           await updateStatus(id, ns);
-          if (badge) badge.textContent = ns;
+          if (badge) applyStatusBadge(badge, ns);
           btn.setAttribute('data-status', ns);
         }catch(e){
           alert('Could not update status');
@@ -277,6 +343,31 @@
           const pre = `<span class="btn btn-outline-success"><i class="bi bi-cash-coin me-1"></i>Pre-Tax ${fmtINR(o.pre_tax)}</span>`;
           const amt = `<span class="btn btn-outline-success"><i class="bi bi-cash-stack me-1"></i>Amount ${fmtINR(o.amount)}</span>`;
           document.getElementById('opmAmounts').innerHTML = pre + ' ' + amt;
+          // Status dropdown + badge inside modal
+          const statusSel = document.getElementById('opmStatusSelect');
+          const statusBadge = document.getElementById('opmStatusBadge');
+          const currentStatus = String(o.status || STATUSES[0] || '');
+          if (statusSel) {
+            statusSel.innerHTML = STATUSES.map(s=>`<option value="${s.replace(/"/g,'&quot;')}">${s}</option>`).join('');
+            statusSel.value = currentStatus;
+          }
+          if (statusBadge) {
+            applyStatusBadge(statusBadge, currentStatus);
+          }
+          if (statusSel) {
+            statusSel.onchange = async ()=>{
+              const ns = statusSel.value;
+              try{
+                await updateStatus(id, ns);
+                const rowBadge = document.querySelector(`.order-status[data-id="${id}"]`);
+                if (rowBadge) applyStatusBadge(rowBadge, ns);
+                if (statusBadge) applyStatusBadge(statusBadge, ns);
+              }catch(e){
+                alert('Could not update status');
+                statusSel.value = currentStatus;
+              }
+            };
+          }
           // Wire actions
           document.getElementById('opmEdit').href = '/?action=orders&subaction=edit&id=' + encodeURIComponent(id);
           document.getElementById('opmPrint').href = '/?action=orders&subaction=print&id=' + encodeURIComponent(id);
@@ -288,6 +379,28 @@
       });
     });
   })();
+ </script>
+
+ <script>
+ async function deleteOrder(id){
+   if (!confirm('Delete this order? This action cannot be undone.')) return false;
+   try {
+     const res = await fetch('/?action=orders&subaction=delete&id='+encodeURIComponent(id), { method:'POST' });
+     if (!res.ok) throw new Error('Failed');
+     const data = await res.json();
+     if (data && data.success) {
+       if (typeof toast === 'function') toast('Order deleted','success');
+       location.reload();
+     } else {
+       if (typeof toast === 'function') toast('Unable to delete order','danger');
+       else alert('Unable to delete order');
+     }
+   } catch(e) {
+     if (typeof toast === 'function') toast('Error deleting order','danger');
+     else alert('Error deleting order');
+   }
+   return false;
+ }
  </script>
 
  <script>

@@ -9,8 +9,10 @@
   $itemsData = $items ?? [];
   $termsData = [];
   if (!empty($terms) && is_array($terms)) {
-      foreach ($terms as $tRow) {
-          $txt = (string)($tRow['term_text'] ?? '');
+      foreach ($terms as $tVal) {
+          // Controller/model now provide terms as plain strings from orders.terms_json
+          $txt = is_array($tVal) ? (string)($tVal['term_text'] ?? '') : (string)$tVal;
+          $txt = trim($txt);
           if ($txt !== '') { $termsData[] = $txt; }
       }
   }
@@ -67,8 +69,32 @@
                 <div class="col-md-3">
                     <label class="form-label">Status</label>
                     <select class="form-select" name="status">
-                        <?php $curStatus = (string)($order['status'] ?? 'Pending'); foreach (["Pending","Received","Bill Submitted","Delivered"] as $st): ?>
-                            <option value="<?= $st ?>" <?= $curStatus === $st ? 'selected' : '' ?>><?= $st ?></option>
+                        <?php
+                        $curStatus = (string)($order['status'] ?? 'Purchase order / Work Order Received');
+                        $allStatuses = [
+                            'Purchase order / Work Order Received',
+                            'Purchase order / Work Order Sent',
+                            'Advance Payment Received',
+                            'Advance Payment Sent',
+                            'Material Arrangement in process',
+                            'Material Dispatched',
+                            'Material Delivered',
+                            'Material Received',
+                            'Complete Payment Done',
+                            'Installation Start',
+                            'Installation is going on',
+                            'Installation is completed',
+                            'Project is handover to the client',
+                            'Bill Submitted',
+                            'Final Payment Received',
+                            'WIP',
+                            'Query',
+                            'Packed',
+                            'Cancelled',
+                            'Done',
+                        ];
+                        foreach ($allStatuses as $st): ?>
+                            <option value="<?= htmlspecialchars($st) ?>" <?= $curStatus === $st ? 'selected' : '' ?>><?= htmlspecialchars($st) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -169,6 +195,7 @@
             <span>Terms &amp; Conditions</span>
             <div class="d-flex gap-2">
                 <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearTerms()"><i class="bi bi-trash"></i> Clear All</button>
+                <button type="button" class="btn btn-sm btn-outline-success" onclick="loadTerms()"><i class="bi bi-arrow-clockwise"></i> Load Master Terms</button>
                 <button type="button" class="btn btn-sm btn-outline-primary" onclick="addTerm()"><i class="bi bi-plus"></i> Add Term / Condition</button>
             </div>
         </div>
@@ -692,106 +719,25 @@ document.getElementById('connectionModal').addEventListener('shown.bs.modal', as
 searchCustomers.addEventListener('input', loadCustomers);
 searchLeads.addEventListener('input', loadLeads);
 
-// --- SalesConfig Terms integration (load default terms into order form) ---
-async function listTerms(){
-  const url = new URL(window.location.origin + '/');
-  url.searchParams.set('action','salesConfig');
-  url.searchParams.set('subaction','listTerms');
-  const res = await fetch(url.toString());
-  if(!res.ok) return [];
-  return await res.json();
-}
-
-function makeTermRow(text, checked=true){
-  const wrap = document.createElement('div');
-  wrap.className = 'd-flex align-items-start gap-2';
-
-  const check = document.createElement('input');
-  check.type = 'checkbox';
-  check.className = 'form-check-input mt-2';
-  check.checked = !!checked;
-  check.name = 'tnc[]';
-  check.value = text;
-
-  const textView = document.createElement('div');
-  textView.className = 'flex-grow-1 form-control-plaintext py-1';
-  textView.textContent = text;
-
-  const textEdit = document.createElement('input');
-  textEdit.type = 'text';
-  textEdit.className = 'form-control d-none';
-  textEdit.value = text;
-
-  const actions = document.createElement('div');
-  actions.className = 'btn-group btn-group-sm';
-
-  const btnEdit = document.createElement('button');
-  btnEdit.type = 'button';
-  btnEdit.className = 'btn btn-outline-secondary';
-  btnEdit.innerHTML = '<i class="bi bi-pencil"></i>';
-  btnEdit.addEventListener('click', ()=>{
-    textView.classList.add('d-none');
-    textEdit.classList.remove('d-none');
-    textEdit.focus();
-  });
-
-  const btnSave = document.createElement('button');
-  btnSave.type = 'button';
-  btnSave.className = 'btn btn-outline-primary';
-  btnSave.innerHTML = '<i class="bi bi-check2"></i>';
-  btnSave.addEventListener('click', ()=>{
-    const val = textEdit.value.trim();
-    textView.textContent = val;
-    check.value = val;
-    textEdit.classList.add('d-none');
-    textView.classList.remove('d-none');
-  });
-
-  const btnCancel = document.createElement('button');
-  btnCancel.type = 'button';
-  btnCancel.className = 'btn btn-outline-secondary';
-  btnCancel.innerHTML = '<i class="bi bi-x"></i>';
-  btnCancel.addEventListener('click', ()=>{
-    textEdit.value = check.value;
-    textEdit.classList.add('d-none');
-    textView.classList.remove('d-none');
-  });
-
-  const btnDelete = document.createElement('button');
-  btnDelete.type = 'button';
-  btnDelete.className = 'btn btn-outline-danger';
-  btnDelete.innerHTML = '<i class="bi bi-trash"></i>';
-  btnDelete.addEventListener('click', ()=>{
-    wrap.remove();
-  });
-
-  actions.append(btnEdit, btnSave, btnCancel, btnDelete);
-
-  const body = document.createElement('div');
-  body.className = 'flex-grow-1';
-  body.append(textView, textEdit);
-
-  wrap.append(check, body, actions);
-  return wrap;
-}
-
+// --- SalesConfig Terms integration (load default terms into order form, same as quotations) ---
 async function loadTerms(){
-  const rows = await listTerms();
-  const termsBox = document.getElementById('termsBox');
-  termsBox.innerHTML = '';
-  (rows||[]).forEach(row => {
-    const text = row.text || '';
-    if (!text) return;
-    const el = makeTermRow(text, !!row.is_active);
-    termsBox.appendChild(el);
-  });
-  syncTerms();
+  try {
+    const url = new URL(window.location.origin + '/');
+    url.searchParams.set('action','salesConfig');
+    url.searchParams.set('subaction','listTerms');
+    const res = await fetch(url.toString());
+    if (!res.ok) return;
+    const all = await res.json();
+    const active = (all || []).filter(t => String(t.is_active) === '1')
+      .sort((a,b)=> (a.display_order||0) - (b.display_order||0));
+    const box = document.getElementById('termsBox');
+    box.innerHTML = '';
+    active.forEach(t => addTerm(t.text || ''));
+    syncTerms();
+  } catch(e) {
+    // ignore
+  }
 }
-
-document.addEventListener('DOMContentLoaded', ()=>{
-  loadTerms();
-  bindAddCustomerFormOnce();
-});
 
 // ===== Inline Add Customer (reuse from quotations, adapted for orders) =====
 let addCustomerPendingAddresses = [];

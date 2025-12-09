@@ -30,6 +30,7 @@ class Order {
             status VARCHAR(50) NOT NULL DEFAULT 'Pending',
             total DECIMAL(12,2) NOT NULL DEFAULT 0,
             attachment_path VARCHAR(255) NULL,
+            terms_json LONGTEXT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             INDEX(customer_id), INDEX(status), INDEX(due_date)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -75,6 +76,7 @@ class Order {
         try { $pdo->exec("ALTER TABLE orders ADD COLUMN sales_credit VARCHAR(150) NULL AFTER notes"); } catch (Throwable $e) {}
         try { $pdo->exec("ALTER TABLE orders ADD COLUMN order_date DATE NULL AFTER sales_credit"); } catch (Throwable $e) {}
         try { $pdo->exec("ALTER TABLE orders ADD COLUMN attachment_path VARCHAR(255) NULL AFTER total"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN terms_json LONGTEXT NULL AFTER attachment_path"); } catch (Throwable $e) {}
         try { $pdo->exec("ALTER TABLE orders ADD INDEX idx_orders_owner_id (owner_id)"); } catch (Throwable $e) {}
         // Order items
         try { $pdo->exec("ALTER TABLE order_items ADD COLUMN owner_id INT NULL AFTER id"); } catch (Throwable $e) {}
@@ -140,17 +142,27 @@ class Order {
             $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
             $userId  = (int)($_SESSION['user']['id'] ?? 0);
             if ($ownerId <= 0 || $userId <= 0) { throw new Exception('User not authenticated'); }
+
+            // Auto-assign next order number per owner if none provided
+            $orderNo = trim((string)($data['order_no'] ?? ''));
+            if ($orderNo === '') {
+                $stNext = $pdo->prepare('SELECT MAX(CAST(order_no AS UNSIGNED)) AS max_no FROM orders WHERE owner_id = ?');
+                $stNext->execute([$ownerId]);
+                $rowNext = $stNext->fetch(PDO::FETCH_ASSOC);
+                $next = isset($rowNext['max_no']) ? (int)$rowNext['max_no'] : 0;
+                $orderNo = (string)($next + 1);
+            }
             $st = $pdo->prepare('INSERT INTO orders (
                 owner_id, created_by_user_id, customer_id, contact_name, order_no, customer_po, category,
                 billing_address, shipping_address, bank_account_id, notes, sales_credit,
-                order_date, due_date, status, attachment_path
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+                order_date, due_date, status, attachment_path, terms_json
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
             $st->execute([
                 $ownerId,
                 $userId,
                 (int)$data['customer_id'],
                 $data['contact_name'] ?? null,
-                $data['order_no'] ?? null,
+                $orderNo,
                 $data['customer_po'] ?? null,
                 $data['category'] ?? null,
                 $data['billing_address'] ?? null,
@@ -160,8 +172,9 @@ class Order {
                 $data['sales_credit'] ?? null,
                 !empty($data['order_date']) ? $data['order_date'] : null,
                 !empty($data['due_date']) ? $data['due_date'] : null,
-                $data['status'] ?? 'Pending',
+                $data['status'] ?? 'Purchase order / Work Order Received',
                 $data['attachment_path'] ?? null,
+                isset($data['terms']) && is_array($data['terms']) ? json_encode(array_values($data['terms']), JSON_UNESCAPED_UNICODE) : json_encode([], JSON_UNESCAPED_UNICODE),
             ]);
             $orderId = (int)$pdo->lastInsertId();
             $total = 0;
@@ -206,19 +219,11 @@ class Order {
                 }
             }
 
-            // Persist order-local Terms & Conditions
+            // Persist order-local Terms & Conditions only into JSON column (no more order_terms wiring)
             $terms = is_array($data['terms'] ?? null) ? $data['terms'] : [];
-            if ($terms) {
-                $tst = $pdo->prepare('INSERT INTO order_terms (owner_id, created_by_user_id, order_id, term_text, display_order) VALUES (?,?,?,?,?)');
-                $i = 1;
-                foreach ($terms as $t) {
-                    $text = trim((string)$t);
-                    if ($text === '') { continue; }
-                    $tst->execute([$ownerId, $userId, $orderId, $text, $i++]);
-                }
-            }
-            $upd = $pdo->prepare('UPDATE orders SET total = ? WHERE owner_id = ? AND id = ?');
-            $upd->execute([$total, $ownerId, $orderId]);
+            $termsJson = json_encode(array_values($terms), JSON_UNESCAPED_UNICODE);
+            $upd = $pdo->prepare('UPDATE orders SET total = ?, terms_json = ? WHERE owner_id = ? AND id = ?');
+            $upd->execute([$total, $termsJson, $ownerId, $orderId]);
             $pdo->commit();
             return $orderId;
         } catch (Throwable $e) {
@@ -253,10 +258,18 @@ class Order {
         $items = $it->fetchAll(PDO::FETCH_ASSOC);
 
         // Load order-local Terms & Conditions
-        $tt = $pdo->prepare('SELECT term_text, display_order FROM order_terms WHERE owner_id = ? AND order_id = ? ORDER BY display_order ASC, id ASC');
-        $tt->execute([$ownerId, $id]);
-        $terms = $tt->fetchAll(PDO::FETCH_ASSOC);
-
+        $terms = [];
+        if (!empty($order['terms_json'])) {
+            try {
+                $decoded = json_decode((string)$order['terms_json'], true);
+                if (is_array($decoded)) {
+                    foreach ($decoded as $t) {
+                        $t = trim((string)$t);
+                        if ($t !== '') { $terms[] = $t; }
+                    }
+                }
+            } catch (Throwable $e) { /* ignore */ }
+        }
         $subtotal = 0.0; foreach ($items as $row) { $subtotal += (float)($row['amount'] ?? 0); }
         $order['items'] = $items;
         $order['terms'] = $terms;
@@ -304,19 +317,18 @@ class Order {
                 $id,
             ]);
 
-            // Clear existing items and terms for this order
+            // Clear existing items for this order (terms are now only in JSON column)
             $pdo->prepare('DELETE FROM order_items WHERE owner_id = ? AND order_id = ?')->execute([$ownerId, $id]);
-            $pdo->prepare('DELETE FROM order_terms WHERE owner_id = ? AND order_id = ?')->execute([$ownerId, $id]);
 
-            // Reinsert items and recompute total
+            // Reinsert items and recompute total (mirror create() structure, including description)
             $total = 0;
             $items = is_array($data['items'] ?? null) ? $data['items'] : [];
             if ($items) {
                 $ist = $pdo->prepare('INSERT INTO order_items (
                     owner_id, created_by_user_id, order_id,
-                    item_name, qty, done_qty, unit, rate,
+                    item_name, description, qty, done_qty, unit, rate,
                     hsn_sac, discount, gst_pct, gst_included, taxable, amount
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
                 foreach ($items as $it) {
                     $name = trim($it['item_name'] ?? '');
                     if ($name === '') { continue; }
@@ -324,6 +336,7 @@ class Order {
                     $unit = $it['unit'] ?? 'no.s';
                     $rate = (float)($it['rate'] ?? 0);
                     $hsn  = $it['hsn_sac'] ?? null;
+                    $desc = $it['description'] ?? null;
                     $discount = (float)($it['discount'] ?? 0);
                     $gstPct   = (float)($it['gst_pct'] ?? 0);
                     $gstIncl  = !empty($it['gst_included']) ? 1 : 0;
@@ -335,6 +348,7 @@ class Order {
                         $userId,
                         $id,
                         $name,
+                        $desc,
                         $qty,
                         0,
                         $unit,
@@ -349,23 +363,41 @@ class Order {
                 }
             }
 
-            // Reinsert order-local Terms & Conditions
+            // Persist order-local Terms & Conditions only into JSON column
             $terms = is_array($data['terms'] ?? null) ? $data['terms'] : [];
-            if ($terms) {
-                $tst = $pdo->prepare('INSERT INTO order_terms (owner_id, created_by_user_id, order_id, term_text, display_order) VALUES (?,?,?,?,?)');
-                $i = 1;
-                foreach ($terms as $t) {
-                    $text = trim((string)$t);
-                    if ($text === '') { continue; }
-                    $tst->execute([$ownerId, $userId, $id, $text, $i++]);
-                }
-            }
-
-            $upd = $pdo->prepare('UPDATE orders SET total = ? WHERE owner_id = ? AND id = ?');
-            $upd->execute([$total, $ownerId, $id]);
+            $termsJson = json_encode(array_values($terms), JSON_UNESCAPED_UNICODE);
+            $upd = $pdo->prepare('UPDATE orders SET total = ?, terms_json = ? WHERE owner_id = ? AND id = ?');
+            $upd->execute([$total, $termsJson, $ownerId, $id]);
 
             $pdo->commit();
             return true;
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    public function delete(int $id): bool {
+        $pdo = $this->db->getConnection();
+        $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+        if ($ownerId <= 0) { throw new Exception('Owner context missing'); }
+        $pdo->beginTransaction();
+        try {
+            // Ensure ownership
+            $chk = $pdo->prepare('SELECT id FROM orders WHERE owner_id = ? AND id = ?');
+            $chk->execute([$ownerId, $id]);
+            if (!$chk->fetchColumn()) {
+                $pdo->rollBack();
+                return false;
+            }
+            // Delete children first
+            $pdo->prepare('DELETE FROM order_items WHERE owner_id = ? AND order_id = ?')->execute([$ownerId, $id]);
+            $pdo->prepare('DELETE FROM order_terms WHERE owner_id = ? AND order_id = ?')->execute([$ownerId, $id]);
+            // Delete header
+            $del = $pdo->prepare('DELETE FROM orders WHERE owner_id = ? AND id = ?');
+            $ok = $del->execute([$ownerId, $id]);
+            $pdo->commit();
+            return $ok;
         } catch (Throwable $e) {
             $pdo->rollBack();
             throw $e;

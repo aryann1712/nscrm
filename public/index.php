@@ -213,11 +213,17 @@ if ($action === 'inventory') {
         case 'store':
             $controller->store();
             break;
+        case 'update':
+            $controller->update((int)$id);
+            break;
         case 'updateStatus':
             $controller->updateStatus();
             break;
         case 'showJson':
             $controller->showJson();
+            break;
+        case 'delete':
+            $controller->delete();
             break;
         default:
             $controller->index();

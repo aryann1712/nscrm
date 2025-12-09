@@ -2,13 +2,17 @@
 // Variables available: $row (quotation), $items (array), $terms (array)
 // Simplified printable view. Use browser's Print to save as PDF.
 // Also used by Dompdf -> prefer absolute URLs for remote assets
+if (session_status() === PHP_SESSION_NONE) { @session_start(); }
+require_once __DIR__ . '/../../models/User.php';
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 $baseUrl = $scheme . '://' . $host;
+$ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+$assetBase = '/uploads/settings' . ($ownerId > 0 ? '/owner_' . $ownerId : '');
 // Prepare signature source: for PDF, embed as base64 if available; for browser use URL
 $signatureData = null;
-$signatureUrl = $baseUrl . '/uploads/settings/signature.png';
-$sigFsPath = dirname(__DIR__, 3) . '/public/uploads/settings/signature.png';
+$signatureUrl = $baseUrl . $assetBase . '/signature.png';
+$sigFsPath = dirname(__DIR__, 3) . '/public' . $assetBase . '/signature.png';
 if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
   if (!empty($forPdf)) {
     $mime = 'image/png';
@@ -42,7 +46,7 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
       content: '';
       position: absolute;
       inset: 0;
-      background: url('<?= htmlspecialchars($baseUrl) ?>/uploads/settings/print_header.png') no-repeat center center;
+      background: url('<?= htmlspecialchars($baseUrl . $assetBase) ?>/print_header.png') no-repeat center center;
       background-size middle; /* visible all over */
       opacity: 0.06; /* light so it doesn't block text */
       pointer-events: none;
@@ -57,10 +61,38 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
   <div class="doc">
     <div class="d-flex justify-content-between align-items-start mb-3">
       <div>
-        <img class="logo" src="<?= htmlspecialchars($baseUrl) ?>/uploads/settings/print_header.png" alt="Logo" onerror="this.style.display='none'"/>
+        <img class="logo" src="<?= htmlspecialchars($baseUrl . $assetBase) ?>/print_header.png" alt="Logo" onerror="this.style.display='none'"/>
       </div>
       <div class="text-end small" style="min-width:260px;">
-        <div class="fw-bold" style="font-size:16px; white-space:normal;"><?= htmlspecialchars($settings['basic_company'] ?? 'NS Technology ') ?></div>
+        <div class="fw-bold" style="font-size:16px; white-space:normal;">
+          <?php
+          $userCompany = trim((string)($_SESSION['user']['company_name'] ?? ''));
+          $userName    = trim((string)($_SESSION['user']['name'] ?? ''));
+          $userType    = (string)($_SESSION['user']['type'] ?? '');
+          if ($userType === 'customer') {
+            // Customer portal: show the owner user's company_name / name (id = owner_id, is_owner = 1)
+            $printCompany = 'Your Company';
+            $ownerKey = (int)($_SESSION['user']['owner_id'] ?? 0);
+            if ($ownerKey > 0) {
+              try {
+                $uModel = new User();
+                $ownerUser = $uModel->get($ownerKey);
+                if ($ownerUser && (int)($ownerUser['is_owner'] ?? 0) === 1) {
+                  $oc = trim((string)($ownerUser['company_name'] ?? ''));
+                  $on = trim((string)($ownerUser['name'] ?? ''));
+                  $printCompany = $oc !== '' ? $oc : ($on !== '' ? $on : $printCompany);
+                }
+              } catch (Throwable $e) {
+                // ignore and keep default
+              }
+            }
+          } else {
+            // Admin/employee side: use the user's company_name / name
+            $printCompany = $userCompany !== '' ? $userCompany : ($userName !== '' ? $userName : 'Your Company');
+          }
+          echo htmlspecialchars($printCompany);
+          ?>
+        </div>
         <div><?= htmlspecialchars(($settings['basic_city'] ?? '') . (empty($settings['basic_state'])?'':(', ' . $settings['basic_state']))) ?></div>
         <?php if (!empty($settings['basic_gstin'])): ?>
           <div>GSTIN: <?= htmlspecialchars($settings['basic_gstin']) ?></div>
@@ -273,7 +305,7 @@ if (is_file($sigFsPath) && filesize($sigFsPath) > 0) {
     </div>
 
     <div class="mt-3 text-center">
-      <img src="<?= htmlspecialchars($baseUrl) ?>/uploads/settings/print_footer.png" alt="Footer" style="max-width:100%;" onerror="this.style.display='none'"/>
+      <img src="<?= htmlspecialchars($baseUrl . $assetBase) ?>/print_footer.png" alt="Footer" style="max-width:100%;" onerror="this.style.display='none'"/>
     </div>
   </div>
 

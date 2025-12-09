@@ -147,6 +147,20 @@
     $isAuthPage = (($_GET['action'] ?? '') === 'auth');
     // Logged-in user's display name
     $displayName = ($isLoggedIn && !empty($_SESSION['user']['name'])) ? htmlspecialchars($_SESSION['user']['name']) : 'Guest';
+    // Company/brand name (owner-wise), used in top navbar and sidebar logo
+    $companyRaw = '';
+    if ($isLoggedIn) {
+        if (!empty($_SESSION['user']['company_name'])) {
+            $companyRaw = (string)$_SESSION['user']['company_name'];
+        } elseif (!empty($_SESSION['user']['name'])) {
+            $companyRaw = (string)$_SESSION['user']['name'];
+        }
+    }
+    if ($companyRaw === '') { $companyRaw = 'NS Technology'; }
+    $companyName = htmlspecialchars($companyRaw);
+    // First initial for circular icon
+    $companyInitial = strtoupper(mb_substr(trim($companyRaw), 0, 1, 'UTF-8'));
+    if ($companyInitial === '') { $companyInitial = 'N'; }
     if (!$isLoggedIn || $isAuthPage): ?>
     <style>
       nav.navbar,
@@ -165,8 +179,8 @@
         <div class="container-fluid">
             <!-- Logo -->
             <a class="navbar-brand d-flex align-items-center" href="/">
-                <div class="me-2" style="width: 32px; height: 32px; background: linear-gradient(135deg, #ff6b35, #f7931e); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;">NS</div>
-                <span style="color: #1e3c72; font-weight: bold; font-size: 18px;">NS Technology</span>
+                <div class="me-2" style="width: 32px; height: 32px; background: linear-gradient(135deg, #ff6b35, #f7931e); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;"><?= $companyInitial ?></div>
+                <span style="color: #ffffff; font-weight: bold; font-size: 18px;"><?= $companyName ?></span>
             </a>
             
             <!-- Navigation Icons -->
@@ -334,7 +348,7 @@
                     <img src="/dist/assets/img/AdminLTELogo.png" alt="AdminLTE Logo" class="brand-image opacity-75 shadow" />
                     <!--end::Brand Image-->
                     <!--begin::Brand Text-->
-                    <span class="brand-text fw-light">NS Technology</span>
+                    <span class="brand-text fw-light" style="color: #ffffff;">NS Technology</span>
                     <!--end::Brand Text-->
                 </a>
                 <!--end::Brand Link-->

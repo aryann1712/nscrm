@@ -330,6 +330,28 @@ class OrdersController {
         }
     }
 
+    public function delete(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo json_encode(['success' => false, 'error' => 'Method Not Allowed']);
+            return;
+        }
+        header('Content-Type: application/json');
+        $id = (int)($_GET['id'] ?? 0);
+        if ($id <= 0) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Invalid id']);
+            return;
+        }
+        try {
+            $ok = $this->orders->delete($id);
+            echo json_encode(['success' => (bool)$ok]);
+        } catch (Throwable $e) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
     // Printable view for orders, similar to quotations print
     public function print(int $id): void {
         if ($id <= 0) {
