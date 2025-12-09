@@ -13,9 +13,14 @@ class CustomersController {
     }
 
     private function json($data, int $code = 200): void {
+        // Clear any previous output
+        if (ob_get_level()) {
+            ob_clean();
+        }
         http_response_code($code);
-        header('Content-Type: application/json');
-        echo json_encode($data);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-cache, must-revalidate');
+        echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
     }
 
@@ -52,16 +57,18 @@ class CustomersController {
             // Create customer row as before
             $id = $this->customers->create($data);
 
-            // Also create user so login works
+            // Also create user so login works - link to current admin as owner
             require_once __DIR__ . '/../models/User.php';
             $userModel = new User();
+            $currentOwnerId = (int)($_SESSION['user']['owner_id'] ?? $_SESSION['user']['id'] ?? 0);
             $userModel->createWithPassword([
                 'name' => $contact_name ?: $company,
                 'email' => $email,
                 'phone' => $phone,
                 'password' => $pin,
                 'company_name' => $company,
-                'type' => 'customer', // for session
+                'type' => 'customer',
+                'owner_id' => $currentOwnerId, // Link to admin who created this customer
                 'email_verified' => 1 // auto-verify customers for login
             ]);
 
@@ -186,45 +193,112 @@ class CustomersController {
 
     public function customerDashboard(): void {
         if (session_status() === PHP_SESSION_NONE) session_start();
-        if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+        
+        // STRICT CHECK: Only customers can access this dashboard
+        if (empty($_SESSION['user'])) {
             header('Location: /?action=auth');
             exit;
         }
+        
+        // Check if user is a customer by type or by checking is_owner flag
+        $userType = $_SESSION['user']['type'] ?? null;
+        $isOwner = (int)($_SESSION['user']['is_owner'] ?? 0);
+        
+        // If not explicitly marked as customer, check if they're not an owner
+        if ($userType !== 'customer' && $isOwner === 1) {
+            // This is an admin/owner, redirect to admin dashboard
+            header('Location: /?action=dashboard');
+            exit;
+        }
+        
+        // If type is not set but is_owner is 0, treat as customer (backward compatibility)
+        if ($userType === null && $isOwner === 0) {
+            // Could be a customer, continue
+        } elseif ($userType !== 'customer') {
+            // Not a customer, redirect to login
+            header('Location: /?action=auth');
+            exit;
+        }
+        
         $userEmail = $_SESSION['user']['email'] ?? '';
-        // Customer info from customers table
+        if (empty($userEmail)) {
+            // Session is invalid; clear and send to login to avoid redirect loops
+            $_SESSION = [];
+            if (ini_get('session.use_cookies')) {
+                $params = session_get_cookie_params();
+                setcookie(session_name(), '', time() - 42000,
+                    $params['path'], $params['domain'],
+                    $params['secure'], $params['httponly']
+                );
+            }
+            session_destroy();
+            header('Location: /?action=auth');
+            exit;
+        }
+        
+        // Customer info from customers table - use owner_id from session
         $customer = $this->customers->getByEmail($userEmail);
+        
+        if (!$customer) {
+            // Customer record not found; clear session and redirect to login to prevent loops
+            $_SESSION = [];
+            if (ini_get('session.use_cookies')) {
+                $params = session_get_cookie_params();
+                setcookie(session_name(), '', time() - 42000,
+                    $params['path'], $params['domain'],
+                    $params['secure'], $params['httponly']
+                );
+            }
+            session_destroy();
+            header('Location: /?action=auth');
+            exit;
+        }
+        
         $customerInsights = [
             'work_done' => 0,
             'pending_tasks' => 0,
             'last_activity' => '-',
         ];
 
-        // Customer's quotations (by company name)
+        // Customer's quotations (by company name) - filtered by owner_id
         require_once __DIR__ . '/../models/Quotation.php';
         $quotationModel = new Quotation();
-        $myQuotations = $customer ? $quotationModel->getAllFiltered(['search'=>$customer['company']]) : [];
-
-        // Customer's invoices (by company name)
-        require_once __DIR__ . '/../models/Invoice.php';
-        $invoiceModel = new Invoice();
-        $myInvoices = $customer ? $invoiceModel->listFiltered('all', $customer['company']) : [];
-
-        // Customer's orders (by customer_id)
-        require_once __DIR__ . '/../models/Order.php';
-        $orderModel = new Order();
-        $myOrders = [];
-        if ($customer && isset($customer['id'])) {
-            $allOrders = $orderModel->getAll([]);
-            foreach ($allOrders as $od) {
-                if (isset($od['customer_id']) && $od['customer_id'] == $customer['id']) {
-                    $myOrders[] = $od;
-                }
+        $quotationModel->ensureSchema();
+        $allQuotations = $quotationModel->getAllFiltered([]);
+        $myQuotations = [];
+        foreach ($allQuotations as $q) {
+            // Match by company name and ensure same owner
+            if (isset($q['customer']) && strtolower(trim($q['customer'])) === strtolower(trim($customer['company']))) {
+                $myQuotations[] = $q;
             }
         }
 
-        // Customer addresses
+        // Customer's invoices (by company name) - filtered by owner_id
+        require_once __DIR__ . '/../models/Invoice.php';
+        $invoiceModel = new Invoice();
+        $allInvoices = $invoiceModel->listFiltered('all', '');
+        $myInvoices = [];
+        foreach ($allInvoices as $inv) {
+            // Match by company name
+            if (isset($inv['customer']) && strtolower(trim($inv['customer'])) === strtolower(trim($customer['company']))) {
+                $myInvoices[] = $inv;
+            }
+        }
+
+        // Customer's orders (by customer_id) - already filtered by owner_id in model
+        require_once __DIR__ . '/../models/Order.php';
+        $orderModel = new Order();
+        $allOrders = $orderModel->getAll([]);
+        $myOrders = [];
+        foreach ($allOrders as $od) {
+            if (isset($od['customer_id']) && (int)$od['customer_id'] === (int)$customer['id']) {
+                $myOrders[] = $od;
+            }
+        }
+
+        // Customer addresses - already filtered by customer_id
         $customerAddresses = [];
-        if ($customer && isset($customer['id'])) {
+        if (isset($customer['id'])) {
             $customerAddresses = $this->addresses->listByCustomer($customer['id']);
         }
 
@@ -246,25 +320,12 @@ class CustomersController {
             $payload = [
                 'contact_name' => trim($_POST['contact_name'] ?? ''),
                 'contact_phone' => trim($_POST['contact_phone'] ?? ''),
-                'contact_email' => trim($_POST['contact_email'] ?? ''),
                 'city' => trim($_POST['city'] ?? ''),
                 'state' => trim($_POST['state'] ?? ''),
                 'country' => trim($_POST['country'] ?? ''),
                 'website' => trim($_POST['website'] ?? ''),
             ];
             $ok = $this->customers->update($id, $payload);
-            
-            // Also update user email if changed
-            if ($payload['contact_email'] && $payload['contact_email'] !== $userEmail) {
-                require_once __DIR__ . '/../models/User.php';
-                $userModel = new User();
-                $user = $userModel->getByEmail($userEmail);
-                if ($user) {
-                    $userModel->update($user['id'], ['email' => $payload['contact_email']]);
-                    $_SESSION['user']['email'] = $payload['contact_email'];
-                }
-            }
-            
             $this->json(['success'=>$ok]);
         } catch (Throwable $e) {
             $this->json(['error'=>'Failed to update','detail'=>$e->getMessage()], 500);
@@ -303,11 +364,524 @@ class CustomersController {
             
             // Update password (hash it)
             $hashed = password_hash($newPin, PASSWORD_BCRYPT);
-            $userModel->update($user['id'], ['password' => $hashed]);
+            if (!$userModel->updatePassword((int)$user['id'], $hashed)) {
+                $this->json(['error' => 'Unable to update password'], 500);
+            }
             
             $this->json(['success'=>true]);
         } catch (Throwable $e) {
             $this->json(['error'=>'Failed to change password','detail'=>$e->getMessage()], 500);
         }
+    }
+
+    public function createSupportTicket(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { $this->json(['error' => 'Method Not Allowed'], 405); }
+        if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+            $this->json(['error' => 'Unauthorized'], 401);
+        }
+        try {
+            $userEmail = $_SESSION['user']['email'] ?? '';
+            $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+            if (!$userEmail || $ownerId <= 0) {
+                $this->json(['error' => 'Customer context missing'], 400);
+            }
+
+            $customer = $this->customers->getByEmail($userEmail);
+            if (!$customer || !isset($customer['id'])) {
+                $this->json(['error' => 'Customer not found'], 404);
+            }
+
+            $issueType = trim($_POST['issue_type'] ?? '');
+            $otherReason = trim($_POST['other_reason'] ?? '');
+            $message = trim($_POST['message'] ?? '');
+
+            if ($issueType === '') {
+                $this->json(['error' => 'Issue type is required'], 400);
+            }
+
+            // If "Other" is selected but no reason provided, treat as validation error
+            if ($issueType === 'other' && $otherReason === '') {
+                $this->json(['error' => 'Please describe your issue in Other reason'], 400);
+            }
+
+            $subject = $issueType === 'other' ? $otherReason : $issueType;
+            if ($message === '') {
+                $message = $subject;
+            }
+
+            require_once __DIR__ . '/../models/SupportTicket.php';
+            $ticketModel = new SupportTicket();
+
+            $relatedOrderId = null;
+            $relatedOrderNumber = null;
+            if ($issueType === 'order_issue') {
+                $relatedOrderId = isset($_POST['related_order_id']) ? (int)$_POST['related_order_id'] : null;
+                if ($relatedOrderId && $relatedOrderId > 0) {
+                    // Try to get order number for display
+                    require_once __DIR__ . '/../models/Order.php';
+                    $orderModel = new Order();
+                    $allOrders = $orderModel->getAll([]);
+                    foreach ($allOrders as $od) {
+                        if ((int)($od['id'] ?? 0) === $relatedOrderId) {
+                            $relatedOrderNumber = $od['order_no'] ?? $od['id'] ?? null;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Optional attachment upload
+            $attachmentPath = null;
+            if (!empty($_FILES['attachment']) && is_uploaded_file($_FILES['attachment']['tmp_name'])) {
+                $err = (int)($_FILES['attachment']['error'] ?? UPLOAD_ERR_OK);
+                if ($err === UPLOAD_ERR_OK) {
+                    $size = (int)($_FILES['attachment']['size'] ?? 0);
+                    if ($size > 10 * 1024 * 1024) {
+                        $this->json(['error' => 'Attachment too large (max 10MB)'], 400);
+                    }
+                    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                    $mime = finfo_file($finfo, $_FILES['attachment']['tmp_name']);
+                    finfo_close($finfo);
+                    $allowed = ['application/pdf','image/png','image/jpeg','image/gif','image/webp'];
+                    if (!in_array($mime, $allowed, true)) {
+                        $this->json(['error' => 'Unsupported attachment type'], 400);
+                    }
+                    $ext = pathinfo($_FILES['attachment']['name'], PATHINFO_EXTENSION);
+                    $safeExt = $ext ? preg_replace('/[^a-zA-Z0-9]/', '', $ext) : '';
+                    $safeName = 'support_' . time() . '_' . bin2hex(random_bytes(4)) . ($safeExt ? ('.' . $safeExt) : '');
+                    $targetDir = realpath(__DIR__ . '/../../public') . '/uploads/support/';
+                    if (!is_dir($targetDir)) {
+                        @mkdir($targetDir, 0777, true);
+                    }
+                    $targetPath = $targetDir . $safeName;
+                    if (!move_uploaded_file($_FILES['attachment']['tmp_name'], $targetPath)) {
+                        $this->json(['error' => 'Failed to save attachment'], 500);
+                    }
+                    $attachmentPath = '/uploads/support/' . $safeName; // web path
+                } elseif ($err !== UPLOAD_ERR_NO_FILE) {
+                    $this->json(['error' => 'Upload error'], 400);
+                }
+            }
+
+            $ticketId = $ticketModel->create([
+                'owner_id' => $ownerId,
+                'customer_id' => (int)$customer['id'],
+                'issue_type' => $issueType,
+                'subject' => $subject,
+                'message' => $message,
+                'status' => 'pending',
+                'priority' => 'medium',
+                'source' => 'customer_portal',
+                'created_by_user_id' => (int)($_SESSION['user']['id'] ?? null),
+                'related_order_id' => $relatedOrderId,
+                'related_order_number' => $relatedOrderNumber,
+                'attachment_path' => $attachmentPath,
+            ]);
+
+            $this->json(['success' => true, 'ticket_id' => $ticketId]);
+        } catch (Throwable $e) {
+            $this->json(['error' => 'Failed to create support ticket', 'detail' => $e->getMessage()], 500);
+        }
+    }
+
+    public function listSupportTickets(): void {
+        // Ensure no output before JSON
+        if (ob_get_level()) {
+            ob_clean();
+        }
+        try {
+            if (session_status() === PHP_SESSION_NONE) session_start();
+            if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+                $this->json(['error' => 'Unauthorized'], 401);
+            }
+
+            $userEmail = $_SESSION['user']['email'] ?? '';
+            $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+            if (!$userEmail || $ownerId <= 0) {
+                $this->json(['error' => 'Customer context missing'], 400);
+            }
+
+            $customer = $this->customers->getByEmail($userEmail);
+            if (!$customer || !isset($customer['id'])) {
+                $this->json(['error' => 'Customer not found'], 404);
+            }
+
+            require_once __DIR__ . '/../models/SupportTicket.php';
+            $ticketModel = new SupportTicket();
+            $tickets = $ticketModel->listByCustomer($ownerId, (int)$customer['id']);
+
+            $this->json(['tickets' => $tickets]);
+        } catch (Throwable $e) {
+            $this->json(['error' => 'Failed to load tickets', 'detail' => $e->getMessage()], 500);
+        }
+    }
+
+    public function listTicketMessages(): void {
+        // Ensure no output before JSON
+        if (ob_get_level()) {
+            ob_clean();
+        }
+        try {
+            if (session_status() === PHP_SESSION_NONE) session_start();
+            if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+                $this->json(['error' => 'Unauthorized'], 401);
+            }
+
+            $ticketId = isset($_GET['ticket_id']) ? (int)$_GET['ticket_id'] : 0;
+            if ($ticketId <= 0) {
+                $this->json(['error' => 'Invalid ticket_id'], 400);
+            }
+
+            $userEmail = $_SESSION['user']['email'] ?? '';
+            $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+            if (!$userEmail || $ownerId <= 0) {
+                $this->json(['error' => 'Customer context missing'], 400);
+            }
+
+            $customer = $this->customers->getByEmail($userEmail);
+            if (!$customer || !isset($customer['id'])) {
+                $this->json(['error' => 'Customer not found'], 404);
+            }
+
+            require_once __DIR__ . '/../models/SupportTicket.php';
+            $ticketModel = new SupportTicket();
+            $ticket = $ticketModel->findById($ownerId, $ticketId);
+            if (!$ticket || (int)$ticket['customer_id'] !== (int)$customer['id']) {
+                $this->json(['error' => 'Ticket not found'], 404);
+            }
+
+            require_once __DIR__ . '/../models/SupportMessage.php';
+            $msgModel = new SupportMessage();
+            $messages = $msgModel->listByTicket($ownerId, $ticketId);
+            $this->json(['messages' => $messages]);
+        } catch (Throwable $e) {
+            $this->json(['error' => 'Failed to load messages', 'detail' => $e->getMessage()], 500);
+        }
+    }
+
+    public function addTicketMessage(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { $this->json(['error' => 'Method Not Allowed'], 405); }
+        try {
+            if (session_status() === PHP_SESSION_NONE) session_start();
+            if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+                $this->json(['error' => 'Unauthorized'], 401);
+            }
+
+            $ticketId = isset($_POST['ticket_id']) ? (int)$_POST['ticket_id'] : 0;
+            $message  = trim($_POST['message'] ?? '');
+            if ($ticketId <= 0 || $message === '') {
+                $this->json(['error' => 'Invalid input'], 400);
+            }
+
+            $userEmail = $_SESSION['user']['email'] ?? '';
+            $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+            if (!$userEmail || $ownerId <= 0) {
+                $this->json(['error' => 'Customer context missing'], 400);
+            }
+
+            $customer = $this->customers->getByEmail($userEmail);
+            if (!$customer || !isset($customer['id'])) {
+                $this->json(['error' => 'Customer not found'], 404);
+            }
+
+            require_once __DIR__ . '/../models/SupportTicket.php';
+            $ticketModel = new SupportTicket();
+            $ticket = $ticketModel->findById($ownerId, $ticketId);
+            if (!$ticket || (int)$ticket['customer_id'] !== (int)$customer['id']) {
+                $this->json(['error' => 'Ticket not found'], 404);
+            }
+
+            require_once __DIR__ . '/../models/SupportMessage.php';
+            $msgModel = new SupportMessage();
+            $senderUserId = (int)($_SESSION['user']['id'] ?? 0);
+            $id = $msgModel->create($ownerId, $ticketId, 'customer', $senderUserId, $message);
+
+            $this->json(['success' => true, 'id' => $id]);
+        } catch (Throwable $e) {
+            $this->json(['error' => 'Failed to add message', 'detail' => $e->getMessage()], 500);
+        }
+    }
+
+    public function printQuotation(int $id): void {
+        if (session_status() === PHP_SESSION_NONE) session_start();
+        if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+            header('Location: /?action=auth');
+            exit;
+        }
+        $userEmail = $_SESSION['user']['email'] ?? '';
+        $customer = $this->customers->getByEmail($userEmail);
+        if (!$customer) {
+            echo 'Customer not found';
+            exit;
+        }
+        require_once __DIR__ . '/../models/Quotation.php';
+        $quotationModel = new Quotation();
+        $quotationModel->ensureSchema();
+        $row = $quotationModel->findById($id);
+        if (!$row) {
+            echo 'Quotation not found';
+            exit;
+        }
+        if (strtolower(trim($row['customer'] ?? '')) !== strtolower(trim($customer['company'] ?? ''))) {
+            echo 'Access denied';
+            exit;
+        }
+        $items = [];
+        if (!empty($row['items_json'])) {
+            $items = json_decode($row['items_json'], true) ?: [];
+        }
+        $terms = [];
+        if (!empty($row['terms_json'])) {
+            $terms = json_decode($row['terms_json'], true) ?: [];
+        }
+        require_once __DIR__ . '/../models/StoreSetting.php';
+        require_once __DIR__ . '/../models/BankAccount.php';
+        $store = new StoreSetting();
+        $settings = $store->getByKeys(['basic_company','basic_city','basic_state','basic_gstin']);
+        $bank = null;
+        if (!empty($row['bank_account_id'])) {
+            $ba = new BankAccount();
+            $bank = $ba->findById((int)$row['bank_account_id']);
+        }
+        // For customers, always render the HTML print view and let the browser handle
+        // "Print" / "Save as PDF". This avoids Dompdf timeouts on shared hosting.
+        $forPdf = false;
+        include __DIR__ . '/../views/quotations/print.php';
+    }
+
+    public function printInvoice(int $id): void {
+        if (session_status() === PHP_SESSION_NONE) session_start();
+        if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+            header('Location: /?action=auth');
+            exit;
+        }
+        $userEmail = $_SESSION['user']['email'] ?? '';
+        $customer = $this->customers->getByEmail($userEmail);
+        if (!$customer) {
+            echo 'Customer not found';
+            exit;
+        }
+        require_once __DIR__ . '/../models/Invoice.php';
+        $invoiceModel = new Invoice();
+        $pdo = (new Database())->getConnection();
+        $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+        $stmt = $pdo->prepare("SELECT * FROM invoices WHERE owner_id = ? AND id = ? LIMIT 1");
+        $stmt->execute([$ownerId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            echo 'Invoice not found';
+            exit;
+        }
+        if (strtolower(trim($row['customer'] ?? '')) !== strtolower(trim($customer['company'] ?? ''))) {
+            echo 'Access denied';
+            exit;
+        }
+        $items = [];
+        if (!empty($row['items_json'])) {
+            $items = json_decode($row['items_json'], true) ?: [];
+        }
+        $terms = [];
+        if (!empty($row['terms_json'])) {
+            $terms = json_decode($row['terms_json'], true) ?: [];
+        }
+        require_once __DIR__ . '/../models/StoreSetting.php';
+        require_once __DIR__ . '/../models/BankAccount.php';
+        $store = new StoreSetting();
+        $settings = $store->getByKeys(['basic_company','basic_city','basic_state','basic_gstin']);
+        $bank = null;
+        if (!empty($row['bank_account_id'])) {
+            $ba = new BankAccount();
+            $bank = $ba->findById((int)$row['bank_account_id']);
+        }
+        // For customers, avoid Dompdf and always render HTML view; browser handles PDF.
+        $forPdf = false;
+        include __DIR__ . '/../views/invoices/print.php';
+    }
+
+    public function getQuotationDetails(int $id): void {
+        // Ensure no output before JSON
+        if (ob_get_level()) {
+            ob_clean();
+        }
+        try {
+            if (session_status() === PHP_SESSION_NONE) session_start();
+            if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+                $this->json(['error'=>'Unauthorized'], 401);
+                return;
+            }
+            $userEmail = $_SESSION['user']['email'] ?? '';
+            $customer = $this->customers->getByEmail($userEmail);
+            if (!$customer) {
+                $this->json(['error'=>'Customer not found'], 404);
+                return;
+            }
+            require_once __DIR__ . '/../models/Quotation.php';
+            $quotationModel = new Quotation();
+            $quotationModel->ensureSchema();
+            $row = $quotationModel->findById($id);
+            if (!$row) {
+                $this->json(['error'=>'Quotation not found'], 404);
+                return;
+            }
+            if (strtolower(trim($row['customer'] ?? '')) !== strtolower(trim($customer['company'] ?? ''))) {
+                $this->json(['error'=>'Access denied'], 403);
+                return;
+            }
+            $items = [];
+            if (!empty($row['items_json'])) {
+                $items = json_decode($row['items_json'], true) ?: [];
+            }
+            $terms = [];
+            if (!empty($row['terms_json'])) {
+                $terms = json_decode($row['terms_json'], true) ?: [];
+            }
+            $this->json([
+                'quotation' => $row,
+                'items' => $items,
+                'terms' => $terms
+            ]);
+        } catch (Throwable $e) {
+            $this->json(['error'=>'Failed to load quotation: ' . $e->getMessage()], 500);
+        }
+    }
+
+    public function getInvoiceDetails(int $id): void {
+        // Ensure no output before JSON
+        if (ob_get_level()) {
+            ob_clean();
+        }
+        try {
+            if (session_status() === PHP_SESSION_NONE) session_start();
+            if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+                $this->json(['error'=>'Unauthorized'], 401);
+                return;
+            }
+            $userEmail = $_SESSION['user']['email'] ?? '';
+            $customer = $this->customers->getByEmail($userEmail);
+            if (!$customer) {
+                $this->json(['error'=>'Customer not found'], 404);
+                return;
+            }
+            require_once __DIR__ . '/../models/Invoice.php';
+            require_once __DIR__ . '/../config/database.php';
+            $pdo = (new Database())->getConnection();
+            $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+            $stmt = $pdo->prepare("SELECT * FROM invoices WHERE owner_id = ? AND id = ? LIMIT 1");
+            $stmt->execute([$ownerId, $id]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                $this->json(['error'=>'Invoice not found'], 404);
+                return;
+            }
+            if (strtolower(trim($row['customer'] ?? '')) !== strtolower(trim($customer['company'] ?? ''))) {
+                $this->json(['error'=>'Access denied'], 403);
+                return;
+            }
+            $items = [];
+            if (!empty($row['items_json'])) {
+                $items = json_decode($row['items_json'], true) ?: [];
+            }
+            $terms = [];
+            if (!empty($row['terms_json'])) {
+                $terms = json_decode($row['terms_json'], true) ?: [];
+            }
+            $this->json([
+                'invoice' => $row,
+                'items' => $items,
+                'terms' => $terms
+            ]);
+        } catch (Throwable $e) {
+            $this->json(['error'=>'Failed to load invoice: ' . $e->getMessage()], 500);
+        }
+    }
+
+    public function getOrderDetails(int $id): void {
+        // Ensure no output before JSON
+        if (ob_get_level()) {
+            ob_clean();
+        }
+        try {
+            if (session_status() === PHP_SESSION_NONE) session_start();
+            if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+                $this->json(['error'=>'Unauthorized'], 401);
+                return;
+            }
+            $userEmail = $_SESSION['user']['email'] ?? '';
+            $customer = $this->customers->getByEmail($userEmail);
+            if (!$customer || !isset($customer['id'])) {
+                $this->json(['error'=>'Customer not found'], 404);
+                return;
+            }
+            require_once __DIR__ . '/../config/database.php';
+            $pdo = (new Database())->getConnection();
+            $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+            $stmt = $pdo->prepare('SELECT o.*, c.company AS customer_name FROM orders o LEFT JOIN customers c ON c.id = o.customer_id AND c.owner_id = o.owner_id WHERE o.owner_id = ? AND o.id = ?');
+            $stmt->execute([$ownerId, $id]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                $this->json(['error'=>'Order not found'], 404);
+                return;
+            }
+            if ((int)($row['customer_id'] ?? 0) !== (int)$customer['id']) {
+                $this->json(['error'=>'Access denied'], 403);
+                return;
+            }
+            $itemsStmt = $pdo->prepare('SELECT id, item_name, qty, done_qty, unit, rate, amount FROM order_items WHERE owner_id = ? AND order_id = ? ORDER BY id ASC');
+            $itemsStmt->execute([$ownerId, $id]);
+            $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+            $termsStmt = $pdo->prepare('SELECT term_text FROM order_terms WHERE owner_id = ? AND order_id = ? ORDER BY display_order ASC');
+            $termsStmt->execute([$ownerId, $id]);
+            $termsRows = $termsStmt->fetchAll(PDO::FETCH_ASSOC);
+            $terms = array_column($termsRows, 'term_text');
+            $this->json([
+                'order' => $row,
+                'items' => $items,
+                'terms' => $terms
+            ]);
+        } catch (Throwable $e) {
+            $this->json(['error'=>'Failed to load order: ' . $e->getMessage()], 500);
+        }
+    }
+
+    public function printOrder(int $id): void {
+        if (session_status() === PHP_SESSION_NONE) session_start();
+        if (empty($_SESSION['user']) || ($_SESSION['user']['type'] ?? null) !== 'customer') {
+            header('Location: /?action=auth');
+            exit;
+        }
+        $userEmail = $_SESSION['user']['email'] ?? '';
+        $customer = $this->customers->getByEmail($userEmail);
+        if (!$customer || !isset($customer['id'])) {
+            echo 'Customer not found';
+            exit;
+        }
+        require_once __DIR__ . '/../models/Order.php';
+        $pdo = (new Database())->getConnection();
+        $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+        $stmt = $pdo->prepare('SELECT o.*, c.company AS customer_name FROM orders o LEFT JOIN customers c ON c.id = o.customer_id AND c.owner_id = o.owner_id WHERE o.owner_id = ? AND o.id = ?');
+        $stmt->execute([$ownerId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            echo 'Order not found';
+            exit;
+        }
+        $itemsStmt = $pdo->prepare('SELECT id, item_name, qty, done_qty, unit, rate, amount FROM order_items WHERE owner_id = ? AND order_id = ? ORDER BY id ASC');
+        $itemsStmt->execute([$ownerId, $id]);
+        $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+        if ((int)($row['customer_id'] ?? 0) !== (int)$customer['id']) {
+            echo 'Access denied';
+            exit;
+        }
+        $termsStmt = $pdo->prepare('SELECT term_text FROM order_terms WHERE owner_id = ? AND order_id = ? ORDER BY display_order ASC');
+        $termsStmt->execute([$ownerId, $id]);
+        $termsRows = $termsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $terms = array_column($termsRows, 'term_text');
+        require_once __DIR__ . '/../models/StoreSetting.php';
+        $store = new StoreSetting();
+        $settings = $store->getByKeys(['basic_company','basic_city','basic_state','basic_gstin']);
+        $bank = null;
+        // For customers, avoid Dompdf and always render HTML view; browser handles PDF.
+        $forPdf = false;
+        include __DIR__ . '/../views/orders/print.php';
     }
 }

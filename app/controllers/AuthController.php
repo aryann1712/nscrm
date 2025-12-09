@@ -5,7 +5,11 @@
         public function showLogin() {
             // If already logged in, go to dashboard
             if (isset($_SESSION['user'])) {
-                header('Location: /?action=dashboard');
+                if (($_SESSION['user']['type'] ?? null) === 'customer') {
+                    header('Location: /?action=customer_dashboard');
+                } else {
+                    header('Location: /?action=dashboard');
+                }
                 exit;
             }
             require __DIR__ . '/../views/auth/login.php';
@@ -46,6 +50,12 @@
                         exit;
                     }
                     // Email already verified; create session and proceed
+                    // Determine user type: use explicit 'type' if set. If not set, treat non-owners as staff/admin, not customers.
+                    $userType = $user['type'] ?? null;
+                    if ($userType === null) {
+                        $userType = ((int)($user['is_owner'] ?? 0) === 1) ? 'owner' : 'staff';
+                    }
+                    
                     $_SESSION['user'] = [
                         'id' => $user['id'] ?? null,
                         'name' => $user['name'] ?? null,
@@ -54,17 +64,16 @@
                         'owner_id' => $user['owner_id'] ?? ($user['id'] ?? null),
                         'is_owner' => (int)($user['is_owner'] ?? 0),
                         'company_name' => $user['company_name'] ?? null,
-                        // Add 'type' if exists, or fallback to user/customer classification
-                        'type' => $user['type'] ?? (($user['is_owner'] ?? 0) ? 'owner' : 'customer'),
+                        'type' => $userType, // Use determined type
                     ];
                     try { $userModel->updateLastLogin((int)$user['id']); } catch (Throwable $te) { /* ignore */ }
                     // If customer type, go to their dashboard
                     if (isset($_SESSION['user']['type']) && $_SESSION['user']['type'] === 'customer') {
                         header('Location: /?action=customer_dashboard');
-                        exit;
+                    } else {
+                        // Owner/admin fallback as before
+                        header('Location: /?action=dashboard');
                     }
-                    // Owner/admin fallback as before
-                    header('Location: /?action=dashboard');
                     exit;
                 }
             } catch (Exception $e) {

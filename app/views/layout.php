@@ -135,6 +135,11 @@
             height: 20px !important;
             border-radius: 0.375rem !important;
         }
+
+        body.fade-out {
+            opacity: 0;
+            transition: opacity 0.4s ease;
+        }
     </style>
     <?php
     // Hide chrome (nav/sidebar/breadcrumbs) on auth page or when not logged in
@@ -142,6 +147,20 @@
     $isAuthPage = (($_GET['action'] ?? '') === 'auth');
     // Logged-in user's display name
     $displayName = ($isLoggedIn && !empty($_SESSION['user']['name'])) ? htmlspecialchars($_SESSION['user']['name']) : 'Guest';
+    // Company/brand name (owner-wise), used in top navbar and sidebar logo
+    $companyRaw = '';
+    if ($isLoggedIn) {
+        if (!empty($_SESSION['user']['company_name'])) {
+            $companyRaw = (string)$_SESSION['user']['company_name'];
+        } elseif (!empty($_SESSION['user']['name'])) {
+            $companyRaw = (string)$_SESSION['user']['name'];
+        }
+    }
+    if ($companyRaw === '') { $companyRaw = 'NS Technology'; }
+    $companyName = htmlspecialchars($companyRaw);
+    // First initial for circular icon
+    $companyInitial = strtoupper(mb_substr(trim($companyRaw), 0, 1, 'UTF-8'));
+    if ($companyInitial === '') { $companyInitial = 'N'; }
     if (!$isLoggedIn || $isAuthPage): ?>
     <style>
       nav.navbar,
@@ -160,8 +179,8 @@
         <div class="container-fluid">
             <!-- Logo -->
             <a class="navbar-brand d-flex align-items-center" href="/">
-                <div class="me-2" style="width: 32px; height: 32px; background: linear-gradient(135deg, #ff6b35, #f7931e); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;">NS</div>
-                <span style="color: #1e3c72; font-weight: bold; font-size: 18px;">NS Technology</span>
+                <div class="me-2" style="width: 32px; height: 32px; background: linear-gradient(135deg, #ff6b35, #f7931e); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;"><?= $companyInitial ?></div>
+                <span style="color: #ffffff; font-weight: bold; font-size: 18px;"><?= $companyName ?></span>
             </a>
             
             <!-- Navigation Icons -->
@@ -307,7 +326,7 @@
                             <!--begin::Menu Footer-->
                             <li class="user-footer">
                                 <a href="#" class="btn btn-default btn-flat">Profile</a>
-                                <a href="#" class="btn btn-default btn-flat float-end">Sign out</a>
+                                <a href="#" class="btn btn-default btn-flat float-end" onclick="logout(); return false;">Sign out</a>
                             </li>
                             <!--end::Menu Footer-->
                         </ul>
@@ -329,7 +348,7 @@
                     <img src="/dist/assets/img/AdminLTELogo.png" alt="AdminLTE Logo" class="brand-image opacity-75 shadow" />
                     <!--end::Brand Image-->
                     <!--begin::Brand Text-->
-                    <span class="brand-text fw-light">NS Technology</span>
+                    <span class="brand-text fw-light" style="color: #ffffff;">NS Technology</span>
                     <!--end::Brand Text-->
                 </a>
                 <!--end::Brand Link-->
@@ -712,11 +731,14 @@ function showHelp() {
 
 function logout() {
     if (confirm('Are you sure you want to logout?')) {
-        // Clear any session data
-        localStorage.clear();
-        sessionStorage.clear();
-        // Redirect to server-side logout
-        window.location.href = '/?action=auth&subaction=logout';
+        try {
+            localStorage.clear();
+            sessionStorage.clear();
+        } catch (e) {}
+        document.body.classList.add('fade-out');
+        setTimeout(function() {
+            window.location.href = '/?action=auth&subaction=logout';
+        }, 400);
     }
 }
 </script>

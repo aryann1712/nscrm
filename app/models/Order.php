@@ -20,9 +20,17 @@ class Order {
             order_no VARCHAR(50) NULL,
             customer_po VARCHAR(100) NULL,
             category VARCHAR(100) NULL,
+            billing_address TEXT NULL,
+            shipping_address TEXT NULL,
+            bank_account_id INT NULL,
+            notes TEXT NULL,
+            sales_credit VARCHAR(150) NULL,
+            order_date DATE NULL,
             due_date DATE NULL,
             status VARCHAR(50) NOT NULL DEFAULT 'Pending',
             total DECIMAL(12,2) NOT NULL DEFAULT 0,
+            attachment_path VARCHAR(255) NULL,
+            terms_json LONGTEXT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             INDEX(customer_id), INDEX(status), INDEX(due_date)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -31,10 +39,16 @@ class Order {
             id INT AUTO_INCREMENT PRIMARY KEY,
             order_id INT NOT NULL,
             item_name VARCHAR(200) NOT NULL,
+            description TEXT NULL,
             qty DECIMAL(12,2) NOT NULL DEFAULT 1,
             done_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
             unit VARCHAR(20) NOT NULL DEFAULT 'no.s',
             rate DECIMAL(12,2) NOT NULL DEFAULT 0,
+            hsn_sac VARCHAR(50) NULL,
+            discount DECIMAL(12,2) NOT NULL DEFAULT 0,
+            gst_pct DECIMAL(5,2) NOT NULL DEFAULT 0,
+            gst_included TINYINT(1) NOT NULL DEFAULT 0,
+            taxable DECIMAL(12,2) NOT NULL DEFAULT 0,
             amount DECIMAL(12,2) NOT NULL DEFAULT 0,
             INDEX(order_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -54,10 +68,26 @@ class Order {
         // Orders
         try { $pdo->exec("ALTER TABLE orders ADD COLUMN owner_id INT NULL AFTER id"); } catch (Throwable $e) {}
         try { $pdo->exec("ALTER TABLE orders ADD COLUMN created_by_user_id INT NULL AFTER owner_id"); } catch (Throwable $e) {}
+        // New header fields for richer order form
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN billing_address TEXT NULL AFTER category"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN shipping_address TEXT NULL AFTER billing_address"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN bank_account_id INT NULL AFTER shipping_address"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN notes TEXT NULL AFTER bank_account_id"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN sales_credit VARCHAR(150) NULL AFTER notes"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN order_date DATE NULL AFTER sales_credit"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN attachment_path VARCHAR(255) NULL AFTER total"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN terms_json LONGTEXT NULL AFTER attachment_path"); } catch (Throwable $e) {}
         try { $pdo->exec("ALTER TABLE orders ADD INDEX idx_orders_owner_id (owner_id)"); } catch (Throwable $e) {}
         // Order items
         try { $pdo->exec("ALTER TABLE order_items ADD COLUMN owner_id INT NULL AFTER id"); } catch (Throwable $e) {}
         try { $pdo->exec("ALTER TABLE order_items ADD COLUMN created_by_user_id INT NULL AFTER owner_id"); } catch (Throwable $e) {}
+        // New per-item pricing / tax fields
+        try { $pdo->exec("ALTER TABLE order_items ADD COLUMN hsn_sac VARCHAR(50) NULL AFTER rate"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE order_items ADD COLUMN discount DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER hsn_sac"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE order_items ADD COLUMN gst_pct DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER discount"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE order_items ADD COLUMN gst_included TINYINT(1) NOT NULL DEFAULT 0 AFTER gst_pct"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE order_items ADD COLUMN taxable DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER gst_included"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE order_items ADD COLUMN description TEXT NULL AFTER item_name"); } catch (Throwable $e) {}
         try { $pdo->exec("ALTER TABLE order_items ADD INDEX idx_order_items_owner_id (owner_id)"); } catch (Throwable $e) {}
         // Order terms
         try { $pdo->exec("ALTER TABLE order_terms ADD COLUMN owner_id INT NULL AFTER id"); } catch (Throwable $e) {}
@@ -112,48 +142,88 @@ class Order {
             $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
             $userId  = (int)($_SESSION['user']['id'] ?? 0);
             if ($ownerId <= 0 || $userId <= 0) { throw new Exception('User not authenticated'); }
-            $st = $pdo->prepare('INSERT INTO orders (owner_id, created_by_user_id, customer_id, contact_name, order_no, customer_po, category, due_date, status, total) VALUES (?,?,?,?,?,?,?,?,?,0)');
+
+            // Auto-assign next order number per owner if none provided
+            $orderNo = trim((string)($data['order_no'] ?? ''));
+            if ($orderNo === '') {
+                $stNext = $pdo->prepare('SELECT MAX(CAST(order_no AS UNSIGNED)) AS max_no FROM orders WHERE owner_id = ?');
+                $stNext->execute([$ownerId]);
+                $rowNext = $stNext->fetch(PDO::FETCH_ASSOC);
+                $next = isset($rowNext['max_no']) ? (int)$rowNext['max_no'] : 0;
+                $orderNo = (string)($next + 1);
+            }
+            $st = $pdo->prepare('INSERT INTO orders (
+                owner_id, created_by_user_id, customer_id, contact_name, order_no, customer_po, category,
+                billing_address, shipping_address, bank_account_id, notes, sales_credit,
+                order_date, due_date, status, attachment_path, terms_json
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
             $st->execute([
                 $ownerId,
                 $userId,
                 (int)$data['customer_id'],
                 $data['contact_name'] ?? null,
-                $data['order_no'] ?? null,
+                $orderNo,
                 $data['customer_po'] ?? null,
                 $data['category'] ?? null,
+                $data['billing_address'] ?? null,
+                $data['shipping_address'] ?? null,
+                isset($data['bank_account_id']) ? (int)$data['bank_account_id'] : null,
+                $data['notes'] ?? null,
+                $data['sales_credit'] ?? null,
+                !empty($data['order_date']) ? $data['order_date'] : null,
                 !empty($data['due_date']) ? $data['due_date'] : null,
-                $data['status'] ?? 'Pending',
+                $data['status'] ?? 'Purchase order / Work Order Received',
+                $data['attachment_path'] ?? null,
+                isset($data['terms']) && is_array($data['terms']) ? json_encode(array_values($data['terms']), JSON_UNESCAPED_UNICODE) : json_encode([], JSON_UNESCAPED_UNICODE),
             ]);
             $orderId = (int)$pdo->lastInsertId();
             $total = 0;
             $items = is_array($data['items'] ?? null) ? $data['items'] : [];
             if ($items) {
-                $ist = $pdo->prepare('INSERT INTO order_items (owner_id, created_by_user_id, order_id, item_name, qty, done_qty, unit, rate, amount) VALUES (?,?,?,?,?,?,?,?,?)');
+                $ist = $pdo->prepare('INSERT INTO order_items (
+                    owner_id, created_by_user_id, order_id,
+                    item_name, description, qty, done_qty, unit, rate,
+                    hsn_sac, discount, gst_pct, gst_included, taxable, amount
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
                 foreach ($items as $it) {
                     $name = trim($it['item_name'] ?? '');
                     if ($name === '') { continue; }
                     $qty = (float)($it['qty'] ?? 1);
                     $unit = $it['unit'] ?? 'no.s';
                     $rate = (float)($it['rate'] ?? 0);
-                    $amount = $qty * $rate;
-                    $total += $amount;
-                    $ist->execute([$ownerId, $userId, $orderId, $name, $qty, 0, $unit, $rate, $amount]);
+                    $hsn  = $it['hsn_sac'] ?? null;
+                    $desc = $it['description'] ?? null;
+                    $discount = (float)($it['discount'] ?? 0);
+                    $gstPct   = (float)($it['gst_pct'] ?? 0);
+                    $gstIncl  = !empty($it['gst_included']) ? 1 : 0;
+                    $taxable  = isset($it['taxable']) ? (float)$it['taxable'] : max($qty * $rate - $discount, 0);
+                    $amount   = isset($it['amount']) ? (float)$it['amount'] : $taxable;
+                    $total   += $amount;
+                    $ist->execute([
+                        $ownerId,
+                        $userId,
+                        $orderId,
+                        $name,
+                        $desc,
+                        $qty,
+                        0,
+                        $unit,
+                        $rate,
+                        $hsn,
+                        $discount,
+                        $gstPct,
+                        $gstIncl,
+                        $taxable,
+                        $amount,
+                    ]);
                 }
             }
 
-            // Persist order-local Terms & Conditions
+            // Persist order-local Terms & Conditions only into JSON column (no more order_terms wiring)
             $terms = is_array($data['terms'] ?? null) ? $data['terms'] : [];
-            if ($terms) {
-                $tst = $pdo->prepare('INSERT INTO order_terms (owner_id, created_by_user_id, order_id, term_text, display_order) VALUES (?,?,?,?,?)');
-                $i = 1;
-                foreach ($terms as $t) {
-                    $text = trim((string)$t);
-                    if ($text === '') { continue; }
-                    $tst->execute([$ownerId, $userId, $orderId, $text, $i++]);
-                }
-            }
-            $upd = $pdo->prepare('UPDATE orders SET total = ? WHERE owner_id = ? AND id = ?');
-            $upd->execute([$total, $ownerId, $orderId]);
+            $termsJson = json_encode(array_values($terms), JSON_UNESCAPED_UNICODE);
+            $upd = $pdo->prepare('UPDATE orders SET total = ?, terms_json = ? WHERE owner_id = ? AND id = ?');
+            $upd->execute([$total, $termsJson, $ownerId, $orderId]);
             $pdo->commit();
             return $orderId;
         } catch (Throwable $e) {
@@ -178,15 +248,160 @@ class Order {
         $st->execute([$ownerId, $id]);
         $order = $st->fetch(PDO::FETCH_ASSOC);
         if (!$order) { return null; }
-        $it = $pdo->prepare('SELECT id, item_name, qty, done_qty, unit, rate, amount FROM order_items WHERE owner_id = ? AND order_id = ? ORDER BY id ASC');
+        $it = $pdo->prepare('SELECT 
+                id, item_name, description, qty, done_qty, unit, rate,
+                hsn_sac, discount, gst_pct, gst_included, taxable, amount
+            FROM order_items
+            WHERE owner_id = ? AND order_id = ?
+            ORDER BY id ASC');
         $it->execute([$ownerId, $id]);
         $items = $it->fetchAll(PDO::FETCH_ASSOC);
+
+        // Load order-local Terms & Conditions
+        $terms = [];
+        if (!empty($order['terms_json'])) {
+            try {
+                $decoded = json_decode((string)$order['terms_json'], true);
+                if (is_array($decoded)) {
+                    foreach ($decoded as $t) {
+                        $t = trim((string)$t);
+                        if ($t !== '') { $terms[] = $t; }
+                    }
+                }
+            } catch (Throwable $e) { /* ignore */ }
+        }
         $subtotal = 0.0; foreach ($items as $row) { $subtotal += (float)($row['amount'] ?? 0); }
-        // For now, no tax fields; expose both pre_tax and amount as subtotal/total
         $order['items'] = $items;
+        $order['terms'] = $terms;
         $order['pre_tax'] = $subtotal;
         $order['amount'] = (float)($order['total'] ?? $subtotal);
         return $order;
+    }
+    
+    public function update(int $id, array $data): bool {
+        $pdo = $this->db->getConnection();
+        $pdo->beginTransaction();
+        try {
+            $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+            $userId  = (int)($_SESSION['user']['id'] ?? 0);
+            if ($ownerId <= 0 || $userId <= 0) { throw new Exception('User not authenticated'); }
+
+            // Ensure the order belongs to this owner
+            $chk = $pdo->prepare('SELECT id FROM orders WHERE owner_id = ? AND id = ?');
+            $chk->execute([$ownerId, $id]);
+            if (!$chk->fetchColumn()) {
+                throw new Exception('Order not found');
+            }
+
+            // Update header (keep total 0 for now, will recalc below)
+            $up = $pdo->prepare('UPDATE orders SET 
+                customer_id = ?, contact_name = ?, order_no = ?, customer_po = ?, category = ?,
+                billing_address = ?, shipping_address = ?, bank_account_id = ?, notes = ?, sales_credit = ?,
+                order_date = ?, due_date = ?, status = ?, total = 0
+            WHERE owner_id = ? AND id = ?');
+            $up->execute([
+                (int)($data['customer_id'] ?? 0),
+                $data['contact_name'] ?? null,
+                $data['order_no'] ?? null,
+                $data['customer_po'] ?? null,
+                $data['category'] ?? null,
+                $data['billing_address'] ?? null,
+                $data['shipping_address'] ?? null,
+                isset($data['bank_account_id']) ? (int)$data['bank_account_id'] : null,
+                $data['notes'] ?? null,
+                $data['sales_credit'] ?? null,
+                !empty($data['order_date']) ? $data['order_date'] : null,
+                !empty($data['due_date']) ? $data['due_date'] : null,
+                $data['status'] ?? 'Pending',
+                $ownerId,
+                $id,
+            ]);
+
+            // Clear existing items for this order (terms are now only in JSON column)
+            $pdo->prepare('DELETE FROM order_items WHERE owner_id = ? AND order_id = ?')->execute([$ownerId, $id]);
+
+            // Reinsert items and recompute total (mirror create() structure, including description)
+            $total = 0;
+            $items = is_array($data['items'] ?? null) ? $data['items'] : [];
+            if ($items) {
+                $ist = $pdo->prepare('INSERT INTO order_items (
+                    owner_id, created_by_user_id, order_id,
+                    item_name, description, qty, done_qty, unit, rate,
+                    hsn_sac, discount, gst_pct, gst_included, taxable, amount
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+                foreach ($items as $it) {
+                    $name = trim($it['item_name'] ?? '');
+                    if ($name === '') { continue; }
+                    $qty = (float)($it['qty'] ?? 1);
+                    $unit = $it['unit'] ?? 'no.s';
+                    $rate = (float)($it['rate'] ?? 0);
+                    $hsn  = $it['hsn_sac'] ?? null;
+                    $desc = $it['description'] ?? null;
+                    $discount = (float)($it['discount'] ?? 0);
+                    $gstPct   = (float)($it['gst_pct'] ?? 0);
+                    $gstIncl  = !empty($it['gst_included']) ? 1 : 0;
+                    $taxable  = isset($it['taxable']) ? (float)$it['taxable'] : max($qty * $rate - $discount, 0);
+                    $amount   = isset($it['amount']) ? (float)$it['amount'] : $taxable;
+                    $total   += $amount;
+                    $ist->execute([
+                        $ownerId,
+                        $userId,
+                        $id,
+                        $name,
+                        $desc,
+                        $qty,
+                        0,
+                        $unit,
+                        $rate,
+                        $hsn,
+                        $discount,
+                        $gstPct,
+                        $gstIncl,
+                        $taxable,
+                        $amount,
+                    ]);
+                }
+            }
+
+            // Persist order-local Terms & Conditions only into JSON column
+            $terms = is_array($data['terms'] ?? null) ? $data['terms'] : [];
+            $termsJson = json_encode(array_values($terms), JSON_UNESCAPED_UNICODE);
+            $upd = $pdo->prepare('UPDATE orders SET total = ?, terms_json = ? WHERE owner_id = ? AND id = ?');
+            $upd->execute([$total, $termsJson, $ownerId, $id]);
+
+            $pdo->commit();
+            return true;
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    public function delete(int $id): bool {
+        $pdo = $this->db->getConnection();
+        $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+        if ($ownerId <= 0) { throw new Exception('Owner context missing'); }
+        $pdo->beginTransaction();
+        try {
+            // Ensure ownership
+            $chk = $pdo->prepare('SELECT id FROM orders WHERE owner_id = ? AND id = ?');
+            $chk->execute([$ownerId, $id]);
+            if (!$chk->fetchColumn()) {
+                $pdo->rollBack();
+                return false;
+            }
+            // Delete children first
+            $pdo->prepare('DELETE FROM order_items WHERE owner_id = ? AND order_id = ?')->execute([$ownerId, $id]);
+            $pdo->prepare('DELETE FROM order_terms WHERE owner_id = ? AND order_id = ?')->execute([$ownerId, $id]);
+            // Delete header
+            $del = $pdo->prepare('DELETE FROM orders WHERE owner_id = ? AND id = ?');
+            $ok = $del->execute([$ownerId, $id]);
+            $pdo->commit();
+            return $ok;
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
     }
 }
 

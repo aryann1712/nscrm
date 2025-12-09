@@ -6,6 +6,7 @@ require_once __DIR__ . '/../models/LeadProduct.php';
 require_once __DIR__ . '/../models/City.php';
 require_once __DIR__ . '/../models/Tag.php';
 require_once __DIR__ . '/../models/StoreSetting.php';
+require_once __DIR__ . '/../models/User.php';
 
 class SalesConfigController {
     private BankAccount $banks;
@@ -213,21 +214,36 @@ class SalesConfigController {
         catch (Throwable $e) { $this->json(['error'=>'Failed to delete','detail'=>$e->getMessage()], 500); }
     }
 
-    // --- Digital Signature ---
+    // --- Digital Signature & asset helpers (owner-wise) ---
     private function basePublicPath(): string {
         // Do not rely on realpath to avoid false on symlinks; compute from project structure
         return rtrim(dirname(__DIR__, 2) . '/public', '/');
     }
 
+    private function currentOwnerId(): int {
+        return (int)($_SESSION['user']['owner_id'] ?? 0);
+    }
+
+    private function ownerSettingsDir(): string {
+        $base = $this->basePublicPath() . '/uploads/settings';
+        $ownerId = $this->currentOwnerId();
+        if ($ownerId > 0) {
+            return $base . '/owner_' . $ownerId;
+        }
+        return $base;
+    }
+
     private function signaturePath(): string {
-        return $this->basePublicPath() . '/uploads/settings/signature.png';
+        return $this->ownerSettingsDir() . '/signature.png';
     }
 
     private function ensureUploadsDir(): void {
         $uploads = $this->basePublicPath() . '/uploads';
         $settings = $uploads . '/settings';
+        $ownerSettings = $this->ownerSettingsDir();
         if (!is_dir($uploads)) { @mkdir($uploads, 0775, true); }
         if (!is_dir($settings)) { @mkdir($settings, 0775, true); }
+        if (!is_dir($ownerSettings)) { @mkdir($ownerSettings, 0775, true); }
     }
 
     // Picks the first successfully uploaded file from a list of field names
@@ -258,19 +274,24 @@ class SalesConfigController {
         return null;
     }
 
-    // Generic helpers for other assets (print header/footer)
+    // Generic helpers for other assets (print header/footer, etc.), owner-wise
     private function assetPath(string $name): string {
-        return $this->basePublicPath() . "/uploads/settings/{$name}.png";
+        return $this->ownerSettingsDir() . "/{$name}.png";
     }
     private function assetUrl(string $name): string {
-        return "/uploads/settings/{$name}.png?ts=" . time();
+        $ownerId = $this->currentOwnerId();
+        $base = '/uploads/settings';
+        if ($ownerId > 0) {
+            $base .= '/owner_' . $ownerId;
+        }
+        return $base . "/{$name}.png?ts=" . time();
     }
 
     public function getSignature(): void {
         $this->ensureUploadsDir();
         $file = $this->signaturePath();
         $exists = is_file($file) && filesize($file) > 0;
-        $url = $exists ? '/uploads/settings/signature.png?ts=' . time() : null;
+        $url = $exists ? $this->assetUrl('signature') : null;
         $this->json(['exists' => $exists, 'url' => $url]);
     }
 
@@ -504,6 +525,10 @@ class SalesConfigController {
     // POST /?action=salesConfig&subaction=saveStoreSettings body: JSON object
     public function saveStoreSettings(): void {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') { $this->json(['error'=>'Method Not Allowed'], 405); }
+        // Only workspace owner (admin) can change company/store settings
+        if (empty($_SESSION['user']['id']) || (int)($_SESSION['user']['is_owner'] ?? 0) !== 1) {
+            $this->json(['error' => 'Forbidden'], 403);
+        }
         $raw = file_get_contents('php://input') ?: '';
         $data = json_decode($raw, true);
         if (!is_array($data)) { $this->json(['error'=>'Invalid JSON'], 400); }
@@ -515,6 +540,22 @@ class SalesConfigController {
         }
         try {
             $this->store->setMany($map);
+            // Keep owner user.company_name in sync with basic_company setting for printing
+            if (array_key_exists('basic_company', $map)) {
+                $ownerId = $this->currentOwnerId();
+                if ($ownerId > 0) {
+                    $u = new User();
+                    $company = trim($map['basic_company'] ?? '');
+                    // Update all non-customer users of this owner so employees inherit the name
+                    $pdo = (new Database())->getConnection();
+                    if ($pdo !== null) {
+                        $stmt = $pdo->prepare("UPDATE users SET company_name = ? WHERE owner_id = ? AND (type IS NULL OR type != 'customer')");
+                        $stmt->execute([$company, $ownerId]);
+                    }
+                    if (!isset($_SESSION['user'])) { $_SESSION['user'] = []; }
+                    $_SESSION['user']['company_name'] = $company;
+                }
+            }
             $this->json(['success'=>true]);
         } catch (Throwable $e) {
             $this->json(['error'=>'Failed to save','detail'=>$e->getMessage()], 500);

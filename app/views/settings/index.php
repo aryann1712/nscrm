@@ -46,14 +46,14 @@
             <div class="row">
                 <!-- Left Column -->
                 <div class="col-md-8">
-                    <!-- Users Panel -->
+                    <!-- Company Employees Panel -->
                     <div class="card">
                         <div class="card-header">
                             <div class="d-flex justify-content-between align-items-center">
-                                <h3 class="card-title">Users (<?= $totalUsers ?>/<?= $maxUsers ?>)</h3>
+                                <h3 class="card-title">Company Employees (<?= $totalUsers ?>/<?= $maxUsers ?>)</h3>
                                 <div>
                                     <a href="/?action=settings&subaction=create" class="btn btn-warning btn-sm">
-                                        <i class="bi bi-plus"></i> Add User
+                                        <i class="bi bi-plus"></i> Add Employee
                                     </a>
                                     <button class="btn btn-outline-secondary btn-sm" onclick="toggleUsersPanel()">
                                         <i class="bi bi-chevron-up"></i>
@@ -139,11 +139,13 @@
                                         Change Admin
                                     </button>
                                 </div>
+                                <?php if ($currentIsOwner): ?>
                                 <div class="col-md-4 mb-2">
                                     <button class="btn btn-warning btn-lg w-100" onclick="changeCompany()">
                                         Change Company
                                     </button>
                                 </div>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
@@ -203,6 +205,7 @@
 </div>
 
 <script>
+const NS_CURRENT_COMPANY_NAME = <?php echo json_encode($_SESSION['user']['company_name'] ?? ($_SESSION['user']['name'] ?? '')); ?>;
 function toggleUsersPanel() {
     const panel = document.getElementById('usersPanel');
     const button = event.target.closest('button');
@@ -228,7 +231,12 @@ function changeAdmin() {
 }
 
 function changeCompany() {
-    alert('Change Company functionality will be implemented soon.');
+    const input = document.getElementById('company_name_input');
+    if (input && typeof NS_CURRENT_COMPANY_NAME === 'string') {
+        input.value = NS_CURRENT_COMPANY_NAME;
+    }
+    const m = new bootstrap.Modal(document.getElementById('companyModal'));
+    m.show();
 }
 
 function showTrainingMaterials() {
@@ -316,6 +324,32 @@ function openRightsModal(userId, userName) {
     document.getElementById('rights_user_name').textContent = userName;
     const m = new bootstrap.Modal(document.getElementById('rightsModal'));
     m.show();
+}
+function submitCompanyForm(e) {
+    if (e) e.preventDefault();
+    const input = document.getElementById('company_name_input');
+    const errorEl = document.getElementById('company_name_error');
+    if (!input) return false;
+    const name = (input.value || '').trim();
+    if (!name) {
+        if (errorEl) errorEl.textContent = 'Company name is required';
+        return false;
+    }
+    if (errorEl) errorEl.textContent = '';
+    fetch('/?action=salesConfig&subaction=saveStoreSettings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ basic_company: name })
+    }).then(r => r.json()).then(d => {
+        if (d && d.success) {
+            window.location.reload();
+        } else {
+            if (errorEl) errorEl.textContent = (d && d.error) ? d.error : 'Failed to save. Please try again.';
+        }
+    }).catch(() => {
+        if (errorEl) errorEl.textContent = 'Network error. Please try again.';
+    });
+    return false;
 }
 </script>
 
@@ -462,6 +496,32 @@ require_once __DIR__ . '/../layout.php';
         <button type="submit" class="btn btn-primary">Save</button>
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
       </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Company Name Change Modal -->
+<div class="modal fade" id="companyModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Change Company Name</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form onsubmit="return submitCompanyForm(event)">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Company Name</label>
+            <input type="text" class="form-control" id="company_name_input" required>
+            <div class="text-danger small mt-1" id="company_name_error"></div>
+          </div>
+          <p class="text-muted mb-0">Only the admin can change the company name. This will update how your company name appears on quotations, orders, invoices and other places.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
       </form>
     </div>
   </div>
