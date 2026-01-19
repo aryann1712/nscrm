@@ -269,6 +269,42 @@ class SettingsController {
         require_once __DIR__ . '/../views/settings/sales_configuration.php';
     }
 
+    // AJAX: GET /?action=settings&subaction=getRights&user_id=123
+    public function getRights(): void {
+        if (session_status() === PHP_SESSION_NONE) { session_start(); }
+        $this->requireOwner();
+        header('Content-Type: application/json');
+        $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+        $userId = (int)($_GET['user_id'] ?? 0);
+        if ($userId <= 0 || $ownerId <= 0) {
+            echo json_encode(['success' => false, 'error' => 'Invalid user']);
+            return;
+        }
+        try {
+            $pdo = (new Database())->getConnection();
+            if (!$pdo) { throw new Exception('DB connection failed'); }
+            // Ensure target user belongs to this owner
+            $chk = $pdo->prepare('SELECT id FROM users WHERE id = ? AND owner_id = ? LIMIT 1');
+            $chk->execute([$userId, $ownerId]);
+            if (!$chk->fetch(PDO::FETCH_ASSOC)) {
+                echo json_encode(['success' => false, 'error' => 'User not found in this workspace']);
+                return;
+            }
+            $key = 'user_rights:' . $userId;
+            $stmt = $pdo->prepare('SELECT svalue FROM store_settings WHERE owner_id = ? AND skey = ? LIMIT 1');
+            $stmt->execute([$ownerId, $key]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $rights = [];
+            if ($row && isset($row['svalue'])) {
+                $decoded = json_decode($row['svalue'], true);
+                if (is_array($decoded)) { $rights = $decoded; }
+            }
+            echo json_encode(['success' => true, 'rights' => $rights]);
+        } catch (Throwable $e) {
+            echo json_encode(['success' => false, 'error' => 'Failed to load rights', 'detail' => $e->getMessage()]);
+        }
+    }
+
     public function saveRights() {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             header('Location: /?action=settings');

@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../models/SupportTicket.php';
+require_once __DIR__ . '/../models/User.php';
 
 class SupportController {
     private SupportTicket $tickets;
@@ -21,6 +22,16 @@ class SupportController {
     }
 
     public function index(): void {
+        $employees = [];
+        if (!empty($_SESSION['user']['owner_id'])) {
+            $ownerId = (int)$_SESSION['user']['owner_id'];
+            try {
+                $userModel = new User();
+                $employees = $userModel->getByOwner($ownerId);
+            } catch (Throwable $e) {
+                $employees = [];
+            }
+        }
         require __DIR__ . '/../views/support/index.php';
     }
 
@@ -30,11 +41,17 @@ class SupportController {
                 $this->json(['error' => 'Unauthorized'], 401);
             }
             $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+            $currentUserId = (int)($_SESSION['user']['id'] ?? 0);
+            $isOwner = (int)($_SESSION['user']['is_owner'] ?? 0) === 1;
             if ($ownerId <= 0) {
                 $this->json(['error' => 'Owner context missing'], 400);
             }
             $status = isset($_GET['status']) && $_GET['status'] !== '' ? $_GET['status'] : null;
-            $tickets = $this->tickets->listByOwner($ownerId, $status);
+            if ($isOwner) {
+                $tickets = $this->tickets->listByOwner($ownerId, $status);
+            } else {
+                $tickets = $this->tickets->listForUser($ownerId, $currentUserId, $status);
+            }
             $this->json(['tickets' => $tickets]);
         } catch (Throwable $e) {
             $this->json(['error' => 'Failed to load tickets', 'detail' => $e->getMessage()], 500);
@@ -47,6 +64,8 @@ class SupportController {
                 $this->json(['error' => 'Unauthorized'], 401);
             }
             $ownerId = (int)($_SESSION['user']['owner_id'] ?? 0);
+            $currentUserId = (int)($_SESSION['user']['id'] ?? 0);
+            $isOwner = (int)($_SESSION['user']['is_owner'] ?? 0) === 1;
             if ($ownerId <= 0) {
                 $this->json(['error' => 'Owner context missing'], 400);
             }
@@ -57,12 +76,30 @@ class SupportController {
                 $this->json(['error' => 'Invalid input'], 400);
             }
 
-            $ok = $this->tickets->updateStatus($ownerId, $id, $status);
+            // Load existing ticket to preserve current assignee when non-owner updates status
+            $ticket = $this->tickets->findById($ownerId, $id);
+            if (!$ticket) {
+                $this->json(['error' => 'Ticket not found'], 404);
+            }
+
+            $assignedToUserId = isset($ticket['assigned_to_user_id']) ? (int)$ticket['assigned_to_user_id'] : null;
+            if ($assignedToUserId <= 0) { $assignedToUserId = null; }
+
+            if ($isOwner) {
+                $postedAssign = isset($_POST['assigned_to_user_id']) ? (int)$_POST['assigned_to_user_id'] : 0;
+                if ($postedAssign > 0) {
+                    $assignedToUserId = $postedAssign;
+                } elseif ($postedAssign === 0) {
+                    // Explicitly unassign when owner chooses blank
+                    $assignedToUserId = null;
+                }
+            }
+
+            $ok = $this->tickets->updateStatus($ownerId, $id, $status, $assignedToUserId);
             if (!$ok) {
                 $this->json(['error' => 'Failed to update status'], 400);
             }
 
-            $ticket = $this->tickets->findById($ownerId, $id);
             $this->json(['success' => true, 'ticket' => $ticket]);
         } catch (Throwable $e) {
             $this->json(['error' => 'Failed to update status', 'detail' => $e->getMessage()], 500);

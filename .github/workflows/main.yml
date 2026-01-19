@@ -8,7 +8,7 @@ on:
 jobs:
   ftp-deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -21,15 +21,17 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           port: ${{ secrets.FTP_PORT }}
           protocol: ftp
-          
-          # Upload only contents, not folder
+
+          # Upload only changed files
           local-dir: ./
-          
-          # 👇 FIX: use relative path
           server-dir: ./
-          
-          dangerous-clean-slate: true
-          timeout: 60000
+
+          # 🚫 DO NOT delete server files
+          dangerous-clean-slate: false
+
+          # This enables diff-based deploy
+          state-name: .ftp-deploy-sync-state.json
+
           exclude: |
             **/.git*
             **/.github/**

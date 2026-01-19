@@ -161,6 +161,12 @@
     // First initial for circular icon
     $companyInitial = strtoupper(mb_substr(trim($companyRaw), 0, 1, 'UTF-8'));
     if ($companyInitial === '') { $companyInitial = 'N'; }
+    // Permissions helper (for sidebar menu hiding)
+    require_once __DIR__ . '/../helpers/permissions.php';
+    $canViewQuotations = function_exists('user_can') ? user_can('crm','quotations','view') : true;
+    $canViewLeads      = function_exists('user_can') ? user_can('crm','leads','view') : true;
+    $canViewOrders     = function_exists('user_can') ? user_can('erp','orders','view') : true;
+    $canViewInvoices   = function_exists('user_can') ? user_can('crm','invoices','view') : true;
     if (!$isLoggedIn || $isAuthPage): ?>
     <style>
       nav.navbar,
@@ -368,30 +374,38 @@
                         
                         <!-- Sales Section -->
                         <li class="nav-header">SALES</li>
+                        <?php if ($canViewQuotations): ?>
                         <li class="nav-item">
                             <a href="/?action=quotations" class="nav-link <?= isActiveMenu('quotations') ?>">
                                 <i class="nav-icon bi bi-receipt"></i>
                                 <p>Quotations</p>
                             </a>
                         </li>
+                        <?php endif; ?>
+                        <?php if ($canViewLeads): ?>
                         <li class="nav-item">
                             <a href="/?action=crm" class="nav-link <?= isActiveMenu('crm') ?>">
                                 <i class="nav-icon bi bi-people"></i>
                                 <p>CRM</p>
                             </a>
                         </li>
+                        <?php endif; ?>
+                        <?php if ($canViewOrders): ?>
                         <li class="nav-item">
                             <a href="/?action=orders" class="nav-link <?= isActiveMenu('orders') ?>">
                                 <i class="nav-icon bi bi-cart"></i>
                                 <p>Orders</p>
                             </a>
                         </li>
+                        <?php endif; ?>
+                        <?php if ($canViewInvoices): ?>
                         <li class="nav-item">
                             <a href="/?action=invoices" class="nav-link <?= isActiveMenu('invoices') ?>">
                                 <i class="nav-icon bi bi-file-earmark-text"></i>
                                 <p>Invoices</p>
                             </a>
                         </li>
+                        <?php endif; ?>
                         
                         <li class="nav-item">
                             <a href="/?action=recovery" class="nav-link <?= isActiveMenu('recovery') ?>">

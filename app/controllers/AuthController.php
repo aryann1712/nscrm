@@ -1,5 +1,6 @@
     <?php
     require_once __DIR__ . '/../models/User.php';
+    require_once __DIR__ . '/../helpers/permissions.php';
 
     class AuthController {
         public function showLogin() {
@@ -71,8 +72,34 @@
                     if (isset($_SESSION['user']['type']) && $_SESSION['user']['type'] === 'customer') {
                         header('Location: /?action=customer_dashboard');
                     } else {
-                        // Owner/admin fallback as before
-                        header('Location: /?action=dashboard');
+                        // Staff/owner: use default page from rights if configured
+                        $defaultAction = 'dashboard';
+                        if (function_exists('load_current_user_rights')) {
+                            $rights = load_current_user_rights();
+                            if (isset($rights['b2b']) && is_array($rights['b2b']) && !empty($rights['b2b']['default_page'])) {
+                                $dp = strtolower((string)$rights['b2b']['default_page']);
+                                switch ($dp) {
+                                    case 'home':
+                                        $defaultAction = 'dashboard';
+                                        break;
+                                    case 'leads':
+                                        $defaultAction = 'crm';
+                                        break;
+                                    case 'customers':
+                                        $defaultAction = 'customers';
+                                        break;
+                                    case 'quotes':
+                                        $defaultAction = 'quotations';
+                                        break;
+                                    case 'invoices':
+                                        $defaultAction = 'invoices';
+                                        break;
+                                    default:
+                                        $defaultAction = 'dashboard';
+                                }
+                            }
+                        }
+                        header('Location: /?action=' . $defaultAction);
                     }
                     exit;
                 }

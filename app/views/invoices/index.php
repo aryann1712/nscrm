@@ -1,4 +1,8 @@
-<?php ob_start(); ?>
+<?php
+ob_start();
+require_once __DIR__ . '/../../helpers/permissions.php';
+$canEditInvoices  = function_exists('user_can') ? user_can('crm','invoices','edit') : true;
+?>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -27,10 +31,13 @@
   <div class="d-flex gap-2">
     <button class="btn btn-outline-secondary btn-sm">Print Settings</button>
     <button class="btn btn-outline-secondary btn-sm">Create Note</button>
+    <?php if ($canEditInvoices): ?>
     <a class="btn btn-primary btn-sm" href="/?action=invoices&subaction=create&type=Invoice">+ Create Invoice</a>
+    <?php endif; ?>
   </div>
 </div>
 
+<?php if ($canEditInvoices): ?>
 <div class="row g-3">
   <div class="col-md-6">
     <div class="card h-100">
@@ -51,6 +58,7 @@
     </div>
   </div>
 </div>
+<?php endif; ?>
 
 <div class="mt-3 d-flex gap-2">
   <button class="btn btn-outline-secondary btn-sm">Training Materials</button>

@@ -62,6 +62,9 @@
           <dt class="col-sm-3">Created At</dt>
           <dd class="col-sm-9" id="tdCreatedAt"></dd>
 
+          <dt class="col-sm-3">Assigned To</dt>
+          <dd class="col-sm-9" id="tdAssignedTo"></dd>
+
           <dt class="col-sm-3">Message</dt>
           <dd class="col-sm-9"><pre id="tdMessage" class="mb-0" style="white-space: pre-wrap; word-break: break-word; background:#f8f9fa; padding:.75rem; border-radius:.25rem;"></pre></dd>
         </dl>
@@ -77,12 +80,28 @@
       </div>
       <div class="modal-footer justify-content-between">
         <div class="d-flex flex-column flex-md-row align-items-start align-items-md-center gap-2">
-          <label for="ticketStatusSelect" class="form-label mb-0">Status</label>
-          <select id="ticketStatusSelect" class="form-select form-select-sm" style="width: 150px;">
-            <option value="pending">Pending</option>
-            <option value="open">Open</option>
-            <option value="closed">Closed</option>
-          </select>
+          <div class="d-flex flex-column flex-md-row align-items-start align-items-md-center gap-2">
+            <label for="ticketStatusSelect" class="form-label mb-0">Status</label>
+            <select id="ticketStatusSelect" class="form-select form-select-sm" style="width: 150px;">
+              <option value="pending">Pending</option>
+              <option value="open">Open</option>
+              <option value="closed">Closed</option>
+            </select>
+          </div>
+          <?php if (!empty($_SESSION['user']['is_owner']) && (int)$_SESSION['user']['is_owner'] === 1): ?>
+          <div class="d-flex flex-column flex-md-row align-items-start align-items-md-center gap-2">
+            <label for="ticketAssignSelect" class="form-label mb-0">Assign To</label>
+            <select id="ticketAssignSelect" class="form-select form-select-sm" style="width: 200px;">
+              <option value="0">Unassigned</option>
+              <?php if (!empty($employees) && is_array($employees)): foreach ($employees as $emp): ?>
+                <option value="<?= (int)($emp['id'] ?? 0) ?>">
+                  <?= htmlspecialchars((string)($emp['name'] ?? ($emp['email'] ?? '')), ENT_QUOTES, 'UTF-8') ?>
+                  <?php if (!empty($emp['is_owner'])): ?>(Admin)<?php endif; ?>
+                </option>
+              <?php endforeach; endif; ?>
+            </select>
+          </div>
+          <?php endif; ?>
         </div>
         <div>
           <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
@@ -123,7 +142,7 @@ function loadOwnerTickets() {
       }
       _supportTickets = tickets;
       let html = '<div class="table-responsive"><table class="table table-bordered table-striped table-sm mb-0">';
-      html += '<thead><tr><th>Ticket ID</th><th>Customer</th><th>Contact</th><th>Issue</th><th>Status</th><th>Priority</th><th>Created</th><th>Att.</th><th style="width:80px;">Action</th></tr></thead><tbody>';
+      html += '<thead><tr><th>Ticket ID</th><th>Customer</th><th>Contact</th><th>Issue</th><th>Status</th><th>Priority</th><th>Assigned To</th><th>Created</th><th>Att.</th><th style="width:80px;">Action</th></tr></thead><tbody>';
       tickets.forEach((t, idx) => {
         const statusVal = (t.status || '').toLowerCase();
         let badgeClass = 'secondary';
@@ -138,6 +157,7 @@ function loadOwnerTickets() {
         html += '<td>' + (t.subject || t.issue_type || '') + '</td>';
         html += '<td><span class="badge bg-' + badgeClass + '">' + (t.status || '').toUpperCase() + '</span></td>';
         html += '<td>' + (t.priority || '') + '</td>';
+        html += '<td>' + (t.assigned_to_name || '') + '</td>';
         html += '<td>' + (t.created_at || '') + '</td>';
         if (t.attachment_path) {
           html += '<td><a href="' + t.attachment_path + '" target="_blank" onclick="event.stopPropagation();" title="View attachment"><i class="bi bi-paperclip"></i></a></td>';
@@ -261,6 +281,10 @@ function openTicketDetail(idx) {
   document.getElementById('tdPriority').textContent = t.priority || '';
   document.getElementById('tdSource').textContent = t.source || '';
   document.getElementById('tdCreatedAt').textContent = t.created_at || '';
+  const assignedEl = document.getElementById('tdAssignedTo');
+  if (assignedEl) {
+    assignedEl.textContent = t.assigned_to_name || '';
+  }
   document.getElementById('tdMessage').textContent = t.message || '';
 
   const attEl = document.getElementById('tdAttachment');
@@ -309,8 +333,16 @@ function saveTicketStatus() {
   if (!statusSel) return;
   const newStatus = statusSel.value;
   if (!newStatus) return;
+  const assignSel = document.getElementById('ticketAssignSelect');
+  let assignedId = '';
+  if (assignSel) {
+    assignedId = assignSel.value || '0';
+  }
 
-  const params = 'id=' + encodeURIComponent(t.id) + '&status=' + encodeURIComponent(newStatus);
+  let params = 'id=' + encodeURIComponent(t.id) + '&status=' + encodeURIComponent(newStatus);
+  if (assignSel) {
+    params += '&assigned_to_user_id=' + encodeURIComponent(assignedId);
+  }
 
   fetch('/?action=support&subaction=updateStatus', {
     method: 'POST',
