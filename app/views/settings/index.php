@@ -320,8 +320,69 @@ function umTransfer() {
 
 // Rights modal
 function openRightsModal(userId, userName) {
-    document.getElementById('rights_user_id').value = userId;
-    document.getElementById('rights_user_name').textContent = userName;
+    const userIdInput = document.getElementById('rights_user_id');
+    const userNameSpan = document.getElementById('rights_user_name');
+    if (!userIdInput || !userNameSpan) return;
+    userIdInput.value = userId;
+    userNameSpan.textContent = userName;
+
+    // Reset selects to sensible defaults while loading
+    const defaults = {
+        'rights[crm][leads]': 'full',
+        'rights[crm][customers]': 'full',
+        'rights[crm][quotations]': 'full',
+        'rights[crm][invoices]': 'full',
+        'rights[erp][inventory]': 'full',
+        'rights[erp][orders]': 'full',
+        'rights[b2b][default_page]': 'home'
+    };
+    Object.keys(defaults).forEach(function(name){
+        const sel = document.querySelector('select[name="'+name+'"]');
+        if (sel) sel.value = defaults[name];
+    });
+
+    // Fetch existing rights for this user (owner-only endpoint)
+    fetch('/?action=settings&subaction=getRights&user_id=' + encodeURIComponent(userId))
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            if (!d || !d.success || !d.rights) return;
+            const rights = d.rights;
+            // Map JSON structure to our selects
+            if (rights.crm) {
+                if (rights.crm.leads) {
+                    const sel = document.querySelector('select[name="rights[crm][leads]"]');
+                    if (sel) sel.value = rights.crm.leads;
+                }
+                if (rights.crm.customers) {
+                    const sel = document.querySelector('select[name="rights[crm][customers]"]');
+                    if (sel) sel.value = rights.crm.customers;
+                }
+                if (rights.crm.quotations) {
+                    const sel = document.querySelector('select[name="rights[crm][quotations]"]');
+                    if (sel) sel.value = rights.crm.quotations;
+                }
+                if (rights.crm.invoices) {
+                    const sel = document.querySelector('select[name="rights[crm][invoices]"]');
+                    if (sel) sel.value = rights.crm.invoices;
+                }
+            }
+            if (rights.erp) {
+                if (rights.erp.inventory) {
+                    const sel = document.querySelector('select[name="rights[erp][inventory]"]');
+                    if (sel) sel.value = rights.erp.inventory;
+                }
+                if (rights.erp.orders) {
+                    const sel = document.querySelector('select[name="rights[erp][orders]"]');
+                    if (sel) sel.value = rights.erp.orders;
+                }
+            }
+            if (rights.b2b && rights.b2b.default_page) {
+                const sel = document.querySelector('select[name="rights[b2b][default_page]"]');
+                if (sel) sel.value = rights.b2b.default_page;
+            }
+        })
+        .catch(function(){ /* ignore errors, keep defaults */ });
+
     const m = new bootstrap.Modal(document.getElementById('rightsModal'));
     m.show();
 }

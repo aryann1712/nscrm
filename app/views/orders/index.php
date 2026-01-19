@@ -1,4 +1,9 @@
-<?php ob_start(); ?>
+<?php
+ob_start();
+require_once __DIR__ . '/../../helpers/permissions.php';
+$canEditOrders   = function_exists('user_can') ? user_can('erp','orders','edit') : true;
+$canDeleteOrders = function_exists('user_can') ? user_can('erp','orders','full') : true;
+?>
 
 <div class="row mb-3">
   <div class="col-md-6">
@@ -7,9 +12,11 @@
     </h1> -->
   </div>
   <div class="col-md-6 text-end">
+    <?php if ($canEditOrders): ?>
     <a href="/?action=orders&subaction=create" class="btn btn-primary">
       <i class="bi bi-plus-circle"></i> Enter Order
     </a>
+    <?php endif; ?>
   </div>
 </div>
 
@@ -188,15 +195,19 @@
             <td><?= number_format((float)($o['total'] ?? 0), 2) ?></td>
             <td><span class="badge order-status" data-id="<?= (int)$o['id'] ?>"><?= htmlspecialchars((string)($o['status'] ?? '')) ?></span></td>
             <td class="text-nowrap d-flex gap-1">
+              <?php if ($canEditOrders): ?>
               <button type="button" class="btn btn-sm btn-outline-success btn-cycle-status" data-id="<?= (int)$o['id'] ?>" data-status="<?= htmlspecialchars((string)($o['status'] ?? 'Pending')) ?>" title="Update status">
                 <i class="bi bi-arrow-repeat"></i>
               </button>
               <a class="btn btn-sm btn-outline-warning btn-edit-preview" href="#" data-id="<?= (int)$o['id'] ?>" title="Edit">
                 <i class="bi bi-pencil"></i>
               </a>
+              <?php endif; ?>
+              <?php if ($canDeleteOrders): ?>
               <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" onclick="return deleteOrder(<?= (int)$o['id'] ?>)">
                 <i class="bi bi-trash"></i>
               </button>
+              <?php endif; ?>
             </td>
           </tr>
         <?php endforeach; endif; ?>

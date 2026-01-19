@@ -1,4 +1,10 @@
-<?php ob_start(); ?>
+<?php
+ob_start();
+require_once __DIR__ . '/../../helpers/permissions.php';
+$canEditQuotes   = function_exists('user_can') ? user_can('crm','quotations','edit') : true;
+$canDeleteQuotes = function_exists('user_can') ? user_can('crm','quotations','full') : true;
+$canCreateInvoiceFromQuote = function_exists('user_can') ? user_can('crm','invoices','edit') : true;
+?>
 
 <div class="card">
 	<div class="card-header d-flex align-items-center justify-content-between">
@@ -27,7 +33,9 @@
 				<input type="hidden" name="period" value="<?= htmlspecialchars($_GET['period'] ?? 'this_month') ?>"/>
 				<input class="form-control" name="q" placeholder="Search" value="<?= htmlspecialchars($_GET['q'] ?? '') ?>"/>
 			</form>
+			<?php if ($canEditQuotes): ?>
 			<a href="/?action=quotations&subaction=create" class="btn btn-primary"><i class="bi bi-plus"></i> Create Quotation</a>
+			<?php endif; ?>
 		</div>
 	</div>
 	<div class="card-body p-0">
@@ -96,9 +104,11 @@
 							>
 								<i class="bi bi-pencil"></i>
 							</a>
+							<?php if ($canDeleteQuotes): ?>
 							<button class="btn btn-sm btn-danger" title="Delete" onclick="return deleteQuote(<?= (int)$r['id'] ?>)">
 								<i class="bi bi-trash"></i>
 							</button>
+							<?php endif; ?>
 							<div class="btn-group">
 								<button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">Status</button>
 								<ul class="dropdown-menu dropdown-menu-end">

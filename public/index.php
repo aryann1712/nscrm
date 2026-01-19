@@ -27,6 +27,7 @@ require_once __DIR__ . '/../app/controllers/SalesConfigController.php';
 require_once __DIR__ . '/../app/controllers/TasksController.php';
 require_once __DIR__ . '/../app/controllers/StoreController.php';
 require_once __DIR__ . '/../app/controllers/AuthController.php';
+require_once __DIR__ . '/../app/helpers/permissions.php';
 
 $action = $_GET['action'] ?? 'dashboard';
 $subaction = $_GET['subaction'] ?? null;
@@ -194,11 +195,17 @@ if ($action === 'inventory') {
     }
 } elseif ($action === 'orders') {
     $controller = new OrdersController();
+    // Orders permissions: view vs edit vs delete
+    if (!user_can('erp', 'orders', 'view')) {
+        header('Location: /?action=dashboard&error=forbidden');
+        exit;
+    }
     switch ($subaction) {
         case 'list':
             $controller->list();
             break;
         case 'edit':
+            require_permission('erp', 'orders', 'edit');
             $controller->edit((int)$id);
             break;
         case 'pdf':
@@ -208,21 +215,26 @@ if ($action === 'inventory') {
             $controller->print((int)$id);
             break;
         case 'create':
+            require_permission('erp', 'orders', 'edit');
             $controller->create();
             break;
         case 'store':
+            require_permission('erp', 'orders', 'edit');
             $controller->store();
             break;
         case 'update':
+            require_permission('erp', 'orders', 'edit');
             $controller->update((int)$id);
             break;
         case 'updateStatus':
+            require_permission('erp', 'orders', 'edit');
             $controller->updateStatus();
             break;
         case 'showJson':
             $controller->showJson();
             break;
         case 'delete':
+            require_permission('erp', 'orders', 'full');
             $controller->delete();
             break;
         default:
@@ -231,20 +243,30 @@ if ($action === 'inventory') {
     }
 } elseif ($action === 'invoices') {
     $controller = new InvoicesController();
+    // Invoices permissions
+    if (!user_can('crm', 'invoices', 'view')) {
+        header('Location: /?action=dashboard&error=forbidden');
+        exit;
+    }
     switch ($subaction) {
         case 'create':
+            require_permission('crm', 'invoices', 'edit');
             $controller->create();
             break;
         case 'store':
+            require_permission('crm', 'invoices', 'edit');
             $controller->store();
             break;
         case 'receive':
+            require_permission('crm', 'invoices', 'edit');
             $controller->receive();
             break;
         case 'edit':
+            require_permission('crm', 'invoices', 'edit');
             $controller->edit((int)$id);
             break;
         case 'update':
+            require_permission('crm', 'invoices', 'edit');
             $controller->update((int)$id);
             break;
         default:
@@ -253,14 +275,22 @@ if ($action === 'inventory') {
     }
 } elseif ($action === 'quotations') {
     $controller = new QuotationController();
+    // Quotations permissions
+    if (!user_can('crm', 'quotations', 'view')) {
+        header('Location: /?action=dashboard&error=forbidden');
+        exit;
+    }
     switch ($subaction) {
         case 'create':
+            require_permission('crm', 'quotations', 'edit');
             $controller->create();
             break;
         case 'store':
+            require_permission('crm', 'quotations', 'edit');
             $controller->store();
             break;
         case 'edit':
+            require_permission('crm', 'quotations', 'edit');
             $controller->edit((int)$id);
             break;
         case 'pdf':
@@ -270,9 +300,11 @@ if ($action === 'inventory') {
             $controller->print((int)$id);
             break;
         case 'update':
+            require_permission('crm', 'quotations', 'edit');
             $controller->update((int)$id);
             break;
         case 'delete':
+            require_permission('crm', 'quotations', 'full');
             $controller->delete((int)$id);
             break;
         case 'listContacts':
@@ -455,8 +487,14 @@ if ($action === 'inventory') {
 } elseif ($action === 'crm') {
     require_once __DIR__ . '/../app/controllers/CrmController.php';
     $controller = new CrmController();
+    // CRM leads/prospects permissions
+    if (!user_can('crm', 'leads', 'view')) {
+        header('Location: /?action=dashboard&error=forbidden');
+        exit;
+    }
     switch ($subaction) {
         case 'customize':
+            require_permission('crm', 'leads', 'edit');
             $controller->customize();
             break;
         case 'listJson':
@@ -466,21 +504,27 @@ if ($action === 'inventory') {
             $controller->showJson();
             break;
         case 'create':
+            require_permission('crm', 'leads', 'edit');
             $controller->create();
             break;
         case 'store':
+            require_permission('crm', 'leads', 'edit');
             $controller->store();
             break;
         case 'edit':
+            require_permission('crm', 'leads', 'edit');
             $controller->edit();
             break;
         case 'update':
+            require_permission('crm', 'leads', 'edit');
             $controller->update();
             break;
         case 'delete':
+            require_permission('crm', 'leads', 'full');
             $controller->delete();
             break;
         case 'deleteAll':
+            require_permission('crm', 'leads', 'full');
             $controller->deleteAll();
             break;
         case 'toggleStar':
@@ -703,6 +747,13 @@ if ($action === 'inventory') {
             break;
         case 'salesConfiguration':
             $controller->salesConfiguration();
+            break;
+        case 'saveRights':
+            $controller->saveRights();
+            break;
+        case 'getRights':
+            // AJAX endpoint to fetch existing rights for a user
+            $controller->getRights();
             break;
         default:
             $controller->index();
