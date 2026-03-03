@@ -25,6 +25,7 @@ require_once __DIR__ . '/../app/controllers/PurchaseOrdersController.php';
 require_once __DIR__ . '/../app/controllers/ManufacturingController.php';
 require_once __DIR__ . '/../app/controllers/SalesConfigController.php';
 require_once __DIR__ . '/../app/controllers/TasksController.php';
+require_once __DIR__ . '/../app/controllers/ChatController.php';
 require_once __DIR__ . '/../app/controllers/StoreController.php';
 require_once __DIR__ . '/../app/controllers/AuthController.php';
 require_once __DIR__ . '/../app/helpers/permissions.php';
@@ -68,7 +69,7 @@ $customerAllowedSubactions = [
 ];
 
 // Admin-only routes that customers cannot access
-$adminOnlyRoutes = ['dashboard', 'inventory', 'quotations', 'orders', 'invoices', 'crm', 'customers', 'settings', 'accounts', 'purchases', 'purchaseOrders', 'manufacturing', 'tasks', 'recovery', 'contracts', 'support', 'store', 'salesConfig'];
+$adminOnlyRoutes = ['dashboard', 'inventory', 'quotations', 'orders', 'invoices', 'crm', 'customers', 'settings', 'accounts', 'purchases', 'purchaseOrders', 'manufacturing', 'tasks', 'recovery', 'contracts', 'support', 'store', 'salesConfig', 'chat'];
 
 if ($isCustomer && in_array($action, $adminOnlyRoutes) && $action !== 'customer_dashboard') {
     // Allow customer-specific subactions in customers route (JSON endpoints)
@@ -514,7 +515,6 @@ if ($action === 'inventory') {
         case 'edit':
             require_permission('crm', 'leads', 'edit');
             $controller->edit();
-            break;
         case 'update':
             require_permission('crm', 'leads', 'edit');
             $controller->update();
@@ -523,27 +523,28 @@ if ($action === 'inventory') {
             require_permission('crm', 'leads', 'full');
             $controller->delete();
             break;
-        case 'deleteAll':
-            require_permission('crm', 'leads', 'full');
-            $controller->deleteAll();
+        default:
+            $controller->index();
             break;
-        case 'toggleStar':
-            $controller->toggleStar();
+    }
+} elseif ($action === 'tasks') {
+    $controller = new TasksController();
+    switch ($subaction) {
+        case 'create':
+            $controller->create();
             break;
-        case 'updateStage':
-            $controller->updateStage();
+        case 'update':
+            $controller->update();
             break;
-        case 'reject':
-            $controller->reject();
+        default:
+            $controller->index();
             break;
-        case 'convertToCustomer':
-            $controller->convertToCustomer();
-            break;
-        case 'updateLastContact':
-            $controller->updateLastContact();
-            break;
-        case 'updateNextFollowup':
-            $controller->updateNextFollowup();
+    }
+} elseif ($action === 'chat') {
+    $controller = new ChatController();
+    switch ($subaction) {
+        case 'send':
+            $controller->send();
             break;
         default:
             $controller->index();

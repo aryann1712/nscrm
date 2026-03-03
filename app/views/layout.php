@@ -481,6 +481,12 @@
                         <!-- Network Section -->
                         <li class="nav-header">NETWORK</li>
                         <li class="nav-item">
+                            <a href="/?action=chat" class="nav-link <?= isActiveMenu('chat') ?>">
+                                <i class="nav-icon bi bi-chat-dots"></i>
+                                <p>Chat</p>
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a href="#" class="nav-link">
                                 <i class="nav-icon bi bi-link-45deg"></i>
                                 <p>Connections</p>
@@ -618,6 +624,8 @@ function getPageTitle() {
             return 'Contracts';
         case 'tasks':
             return 'Tasks';
+        case 'chat':
+            return 'Chat';
         case 'invoices':
             return 'Invoices';
         case 'customers':
@@ -692,6 +700,9 @@ function getBreadcrumbs() {
             break;
         case 'tasks':
             $breadcrumbs .= '<li class="breadcrumb-item active">Tasks</li>';
+            break;
+        case 'chat':
+            $breadcrumbs .= '<li class="breadcrumb-item active">Chat</li>';
             break;
         case 'invoices':
             $breadcrumbs .= '<li class="breadcrumb-item active">Invoices</li>';
