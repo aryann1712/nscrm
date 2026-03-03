@@ -412,6 +412,8 @@ class CrmController {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: /?action=crm'); exit(); }
         try {
             require_once __DIR__ . '/../models/Customer.php';
+            require_once __DIR__ . '/../config/database.php';
+            require_once __DIR__ . '/../services/EmailService.php';
             $id = $_POST['id'] ?? null;
             if (!$id) { throw new Exception('ID is required'); }
 
@@ -433,6 +435,83 @@ class CrmController {
                 'website' => $leadData['website'] ?? null,
                 'country' => $leadData['country'] ?? null,
             ]);
+
+            // Create customer portal user + send welcome email (if email present)
+            $ownerId = (int)($_SESSION['user']['owner_id'] ?? ($_SESSION['user']['id'] ?? 0));
+            $contactEmail = trim((string)($leadData['contact_email'] ?? ''));
+            $contactPhone = trim((string)($leadData['contact_phone'] ?? ''));
+            $contactName  = trim((string)($leadData['contact_person'] ?? ($leadData['business_name'] ?? '')));
+
+            if ($ownerId > 0 && $contactEmail !== '') {
+                try {
+                    $db = new Database();
+                    $pdo = $db->getConnection();
+                    if ($pdo) {
+                        // Avoid duplicate customer users for same owner+email
+                        $chk = $pdo->prepare("SELECT id FROM users WHERE email = ? AND owner_id = ? AND type = 'customer' LIMIT 1");
+                        $chk->execute([$contactEmail, $ownerId]);
+                        $existingUser = $chk->fetch(PDO::FETCH_ASSOC);
+
+                        if (!$existingUser) {
+                            $pin = str_pad((string)rand(0, 9999), 4, '0', STR_PAD_LEFT);
+                            $companyName = (string)($leadData['business_name'] ?? '');
+
+                            $ins = $pdo->prepare("INSERT INTO users (name, email, phone, password, company_name, email_verified, type, owner_id, is_owner) VALUES (?,?,?,?,?,1,'customer',?,0)");
+                            $ins->execute([
+                                $contactName !== '' ? $contactName : $companyName,
+                                $contactEmail,
+                                $contactPhone !== '' ? $contactPhone : null,
+                                $pin,
+                                $companyName,
+                                $ownerId,
+                            ]);
+
+                            // Send welcome email with portal login details
+                            $mailer   = new EmailService();
+                            $loginUrl = 'https://www.nscrm.com/';
+                            $subject  = 'Welcome to NS CRM - Your Account Details';
+
+                            $safeName  = htmlspecialchars($contactName !== '' ? $contactName : $companyName, ENT_QUOTES, 'UTF-8');
+                            $safeEmail = htmlspecialchars($contactEmail, ENT_QUOTES, 'UTF-8');
+                            $safePin   = htmlspecialchars($pin, ENT_QUOTES, 'UTF-8');
+
+                            $message = "
+                              <div style=\"font-family: Arial, sans-serif; font-size:14px; color:#333;\">
+                                <div style=\"background-color:#0052cc; padding:16px; color:#ffffff; text-align:center;\">
+                                  <h2 style=\"margin:0; font-weight:normal;\">Welcome to NS CRM</h2>
+                                </div>
+
+                                <div style=\"padding:16px;\">
+                                  <p>Hello {$safeName},</p>
+
+                                  <p>Your customer account has been created successfully.</p>
+
+                                  <p><strong>Login details:</strong></p>
+                                  <ul>
+                                    <li><strong>Login URL:</strong> <a href=\"{$loginUrl}\" target=\"_blank\">{$loginUrl}</a></li>
+                                    <li><strong>Username (email):</strong> {$safeEmail}</li>
+                                    <li><strong>Password (PIN):</strong> {$safePin}</li>
+                                  </ul>
+
+                                  <p style=\"margin-top:20px; text-align:center;\">
+                                    <a href=\"{$loginUrl}\"\n                                       style=\"display:inline-block; padding:10px 20px; background-color:#0052cc; color:#ffffff; text-decoration:none; border-radius:4px;\"\n                                       target=\"_blank\">\n                                      Login to NS CRM\n                                    </a>
+                                  </p>
+
+                                  <p style=\"margin-top:24px; font-size:12px; color:#777;\">
+                                    If you did not expect this email, you can ignore it.
+                                  </p>
+                                </div>
+                              </div>
+                            ";
+
+                            $mailer->sendHtmlEmail($contactEmail, $contactName !== '' ? $contactName : $companyName, $subject, $message);
+                        }
+                    }
+                } catch (Throwable $te) {
+                    // Do not block conversion flow on email/user creation failure
+                    error_log('[CrmController] convertToCustomer welcome mail failed: ' . $te->getMessage());
+                }
+            }
 
             // Mark lead as Converted
             $lead->update($id, [
